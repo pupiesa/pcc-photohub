@@ -1,0 +1,16 @@
+$body = @{
+  folderName   = "GGG222"
+  filePath     = "C:\Users\chana\Pictures\CHP_9192.jpg"
+  permissions  = 1
+  linkPassword = "0959673099"          # << ตั้งรหัสให้ลิงก์
+  # expiration   = "2025-08-31"      # (ไม่บังคับ)
+  # publicUpload = $false          # ถ้าแชร์โฟลเดอร์และอยากให้ drop ไฟล์ได้ใส่ $true + permissions=7
+  note         = "ลิงก์ส่งงานลูกค้า"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST `
+  -Uri http://localhost:3000/api/nextcloud/upload-and-share `
+  -ContentType "application/json" `
+  -Body $body
+
+***************** Power Shell Test ***************************************
