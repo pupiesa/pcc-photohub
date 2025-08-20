@@ -6,6 +6,7 @@ import {
   CardDescription,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 const WARP_CONFIG = {
   perspective: 150,
@@ -29,13 +30,20 @@ export default function HomePage() {
         />
       </div>
       <Card className="w-80">
-        <CardContent className="flex flex-col gap-2 p-4">
-          <CardTitle>Congratulations on Your Promotion!</CardTitle>
+        <CardContent className="flex flex-col gap-1 py-4">
+          <CardTitle>Welcome to Pcc-Photohub</CardTitle>
           <CardDescription>
-            Your hard work and dedication have paid off. We&apos;re thrilled to
-            see you take this next step in your career. Keep up the fantastic
-            work!
+            Capture your precious moments with our high-quality photobooth
+            service! Perfect for events, parties, and special occasions. Get
+            instant prints with fun props and filters.
+            <br />
+            <br />
           </CardDescription>
+          <span className="text-lg text-center font-semibold text-green-600">
+            only ฿50 per session
+          </span>
+          <br />
+          <Button>test</Button>
         </CardContent>
       </Card>
     </WarpBackground>
