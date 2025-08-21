@@ -2,7 +2,13 @@
 
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
-import React, { HTMLAttributes, useCallback, useMemo, useState, useEffect } from "react";
+import React, {
+  HTMLAttributes,
+  useCallback,
+  useMemo,
+  useState,
+  useEffect,
+} from "react";
 
 interface WarpBackgroundProps extends HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
@@ -28,7 +34,7 @@ const Beam = ({
 }) => {
   const [hue, setHue] = useState(0);
   const [ar, setAr] = useState(1);
-  
+
   useEffect(() => {
     setHue(Math.floor(Math.random() * 360));
     setAr(Math.floor(Math.random() * 10) + 1);
@@ -70,7 +76,7 @@ export const WarpBackground: React.FC<WarpBackgroundProps> = ({
   ...props
 }) => {
   const [isClient, setIsClient] = useState(false);
-  
+
   useEffect(() => {
     setIsClient(true);
   }, []);
@@ -84,12 +90,13 @@ export const WarpBackground: React.FC<WarpBackgroundProps> = ({
 
       for (let i = 0; i < beamsPerSide; i++) {
         const x = Math.floor(i * step);
-        const delay = beamDelayMin + (i / beamsPerSide) * (beamDelayMax - beamDelayMin);
+        const delay =
+          beamDelayMin + (i / beamsPerSide) * (beamDelayMax - beamDelayMin);
         beams.push({ x, delay });
       }
       return beams;
     }
-    
+
     // Client-side random beams
     const beams = [];
     const cellsPerSide = Math.floor(100 / beamSize);
@@ -110,7 +117,7 @@ export const WarpBackground: React.FC<WarpBackgroundProps> = ({
   const leftBeams = useMemo(() => generateBeams(), [generateBeams]);
 
   return (
-    <div className={cn("relative rounded border p-20", className)} {...props}>
+    <div className={cn("relative", className)} {...props}>
       <div
         style={
           {

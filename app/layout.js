@@ -1,5 +1,7 @@
+import { ThemeProvider } from "@/components/themeprovider";
 import "./globals.css";
 import React from "react";
+import { Navbar03 } from "@/components/ui/shadcn-io/navbar-03";
 
 export const metadata = {
   title: "PCC Photo Hub",
@@ -10,12 +12,21 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <link rel="icon" href="/favicon.ico" />
       </head>
-      <body>{children}</body>
+      <body>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
