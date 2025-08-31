@@ -1,0 +1,33 @@
+==============================    exp   ============================
+
+# เพิ่มผู้ใช้ใหม่
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/user `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"number":"0980807909","pin":"0123","file_address":["C:inetpub","C:LDPlayer"]}'
+
+# ค้นหาตามเบอร์ (จะเห็น file_summary)
+Invoke-RestMethod -Method GET -Uri http://localhost:3000/api/user/by-number/0980807909
+
+# เช็ค PIN (เทียบกับ hash)
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/user/check-pin `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"number":"0980807909","pin":"0123"}'
+
+# เพิ่มไฟล์ลง array
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/user/0980807909/file-address `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"file_address":["D:/photos/a.jpg","D:/photos/b.jpg"]}'
+
+# อัปเดตลิงก์ Nextcloud
+Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/user/0980807909/nextcloud-link `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"nextcloud_link":"https://nc.example.com/s/abc123"}'
+
+#เปลี่ยน PIN
+Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/user/0980807909/pin `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"pin":"5678"}'
+
+
+
+====================================================================
