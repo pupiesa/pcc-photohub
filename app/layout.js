@@ -1,8 +1,7 @@
 import { ThemeProvider } from "@/components/themeprovider";
 import "./globals.css";
 import React from "react";
-import { Navbar03 } from "@/components/ui/shadcn-io/navbar-03";
-
+import LayoutWrapper from "@/components/Layoutwrapper";
 export const metadata = {
   title: "PCC Photo Hub",
   description: "photo booth application with live camera preview and capture",
@@ -24,7 +23,7 @@ export default function RootLayout({ children }) {
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <LayoutWrapper>{children}</LayoutWrapper>
         </ThemeProvider>
       </body>
     </html>
