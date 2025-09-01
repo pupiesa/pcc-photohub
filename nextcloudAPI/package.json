@@ -1,26 +1,18 @@
 {
-  "dependencies": {
-    "axios": "^1.11.0",
-    "canvas": "^3.1.2",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.1",
-    "express": "^5.1.0",
-    "fs": "^0.0.1-security",
-    "nextcloud-node-client": "^1.8.1",
-    "node-fetch": "^3.3.2",
-    "path": "^0.12.7",
-    "qrcode": "^1.5.4",
-    "webdav": "^5.8.0"
-  },
-  "name": "projectphoto",
+  "name": "nextcloudAPI",
   "version": "1.0.0",
+  "type": "module",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "dependencies": {
+    "axios": "^1.7.7",
+    "canvas": "^2.11.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3",
+    "webdav": "^5.6.0"
+  }
 }
