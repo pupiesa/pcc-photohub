@@ -31,6 +31,78 @@ Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/user/0980807909/p
 
 
 ====================================================================
+=========================  promo code ==============================
+Endpoint ที่มี
+
+POST /api/promos สร้างโปร
+
+GET /api/promos?active=true ดูรายการ (กรอง active ได้)
+
+GET /api/promos/:code ดูโปรตัวเดียว
+
+PATCH /api/promos/:code อัปเดตบางฟิลด์
+
+POST /api/promos/:code/deactivate ปิดโปร
+
+POST /api/promos/:code/validate ตรวจโค้ด (ไม่เขียน DB)
+
+POST /api/promos/:code/redeem ใช้โค้ด (บันทึกการใช้ + เพิ่ม used_count)
+
+*** use powershell ***
+
+ PowerShell Example Commands for PromoCode API (7 endpoints)
+
+# 1) Create promo (POST /api/promos)
+$body = @{
+  code="BOOTH50"; 
+  type="fixed"; 
+  value=50;
+  start_at="2025-09-01T00:00:00.000Z"; 
+  end_at="2025-10-31T23:59:59.999Z";
+  usage_limit=500; 
+  per_user_limit=1; 
+  is_active=$true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos `
+  -ContentType "application/json" -Body $body
+
+
+# 2) List all promos (GET /api/promos)
+Invoke-RestMethod -Method GET -Uri http://localhost:3000/api/promos
+
+# Only active promos
+Invoke-RestMethod -Method GET -Uri "http://localhost:3000/api/promos?active=true"
+
+
+# 3) Get promo by code (GET /api/promos/:code)
+Invoke-RestMethod -Method GET -Uri http://localhost:3000/api/promos/BOOTH50
+
+
+# 4) Update promo (PATCH /api/promos/:code)
+$update = @{ value=100 } | ConvertTo-Json
+Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/promos/BOOTH50 `
+  -ContentType "application/json" -Body $update
+
+
+# 5) Deactivate promo (POST /api/promos/:code/deactivate)
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos/BOOTH50/deactivate
+
+
+# 6) Validate promo (POST /api/promos/:code/validate)
+$validate = @{ userNumber="0980807909"; orderAmount=300 } | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos/BOOTH50/validate `
+  -ContentType "application/json" -Body $validate
+
+
+# 7) Redeem promo (POST /api/promos/:code/redeem)
+$redeem = @{ userNumber="0980807909"; orderAmount=300 } | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos/BOOTH50/redeem `
+  -ContentType "application/json" -Body $redeem
+
+
+
+====================================================================
 
 ============================React (ใช้ fetch)========================
 
