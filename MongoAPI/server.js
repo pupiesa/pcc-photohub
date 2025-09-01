@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json());
 
 // ====== Mongo URI  ======
-const uri = process.env.MONGODB_URI || 'mongodb://admin:admin1234@s2pid.3bbddns.com:59081/photobooth?authSource=admin';
+const uri = process.env.MONGODB_URI;
 
 // ====== Connect DB ======
 await mongoose.connect(uri, { autoIndex: true });
