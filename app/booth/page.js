@@ -46,14 +46,18 @@ export default function BoothApp() {
           />
         );
       case "photobooth":
-        return <PhotoboothInterface user={user} onLogout={handleLogout} />;
+        return (
+          <div className="flex flex-col items-center">
+            <PhotoboothInterface user={user} onLogout={handleLogout} />
+          </div>
+        );
       default:
         return <StartCard onStartClick={handleStartClick} />;
     }
   };
 
   return (
-    <WarpBackground className="min-h-screen flex flex-col" {...WARP_CONFIG}>
+    <WarpBackground className="h-screen flex flex-col" {...WARP_CONFIG}>
       <div className="text-center pt-8 float-none">
         <GradientText
           className="text-4xl font-bold text-center"
@@ -62,7 +66,7 @@ export default function BoothApp() {
           gradient="linear-gradient(90deg, #00ff00 0%, #00ffff 25%, #ff00ff 50%, #00ffff 75%, #00ff00 100%)"
         />
       </div>
-      <div className="flex-1 flex justify-center mt-10">
+      <div className="flex-1 flex justify-center mt-10 px-10">
         {renderCurrentView()}
       </div>
     </WarpBackground>
