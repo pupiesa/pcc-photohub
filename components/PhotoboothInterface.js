@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import {
   Card,
@@ -15,12 +15,54 @@ const PhotoboothInterface = ({ user, onLogout }) => {
   const [photosTaken, setPhotosTaken] = useState(0);
   const [livePreviewKey, setLivePreviewKey] = useState(Date.now()); // Unique key for live preview refresh
   const [capturedImage, setCapturedImage] = useState(null); // Store captured image details
-  const maxPhotos = 4;
+  const maxPhotos = 2;
+  const videoRef = useRef(null);
+  const streamRef = useRef(null); // persist stream across UI swaps
 
   useEffect(() => {
     // Start live preview when the component mounts
     handleReturnToLive();
   }, []);
+
+  useEffect(() => {
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          // Some browsers require an explicit play()
+          try {
+            await videoRef.current.play();
+          } catch (_) {}
+        }
+      } catch (error) {
+        console.error("Error accessing camera:", error);
+        alert("Failed to access the camera. Please check your permissions.");
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
+
+  // When returning from a captured image, ensure the stream is rebound to the video element
+  useEffect(() => {
+    if (!capturedImage && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      try {
+        videoRef.current.play();
+      } catch (_) {}
+    }
+  }, [capturedImage]);
 
   const handleCapture = async () => {
     try {
@@ -35,7 +77,8 @@ const PhotoboothInterface = ({ user, onLogout }) => {
       );
       console.log("Capture response:", response.data);
       if (response.data.url) {
-        setCapturedImage(`${API_BASE_URL}${response.data.url}`); // Use captured image URL
+        const ts = Date.now();
+        setCapturedImage(`${API_BASE_URL}${response.data.url}?ts=${ts}`); // cache-bust
       } else {
         console.error("No URL in capture response");
         alert(
@@ -51,23 +94,14 @@ const PhotoboothInterface = ({ user, onLogout }) => {
     }
   };
 
-  const handleConfirmCapture = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/video_feed`, {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      console.log("Live preview refreshed:", response.data);
-      setCapturedImage(null); // Clear captured image details
-      setLivePreviewKey(Date.now()); // Refresh live preview
-      setPhotosTaken((prev) => prev + 1); // Increment photos taken
-    } catch (error) {
-      console.error(
-        "Error refreshing live preview:",
-        error.response?.data || error.message
-      );
-      alert("Failed to refresh live preview. Check the console for details.");
+  const handleConfirmCapture = () => {
+    setCapturedImage(null); // Clear captured image details
+    setPhotosTaken((prev) => prev + 1); // Increment photos taken
+    // Ensure playback resumes
+    if (videoRef.current && streamRef.current) {
+      try {
+        videoRef.current.play();
+      } catch (_) {}
     }
   };
 
@@ -84,6 +118,16 @@ const PhotoboothInterface = ({ user, onLogout }) => {
       );
       console.log("Return to live response:", response.data);
 
+      // Clear captured image and restart the camera
+      setCapturedImage(null);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+
       // Force the live preview to refresh
       setLivePreviewKey(Date.now());
     } catch (error) {
@@ -92,6 +136,27 @@ const PhotoboothInterface = ({ user, onLogout }) => {
         error.response?.data || error.message
       );
       alert("Failed to return to live mode. Check the console for details.");
+    }
+  };
+
+  const handleRetake = async () => {
+    // Return to live preview without starting countdown
+    try {
+      await axios.post(
+        `${API_BASE_URL}/return_live`,
+        {},
+        { headers: { "Content-Type": "application/json" } }
+      );
+    } catch (e) {
+      console.warn("/return_live failed (continuing locally):", e?.message);
+    }
+    setCapturedImage(null);
+    setCountdown(null);
+    if (videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      try {
+        await videoRef.current.play();
+      } catch (_) {}
     }
   };
 
@@ -107,7 +172,7 @@ const PhotoboothInterface = ({ user, onLogout }) => {
         setCountdown("📸");
         setTimeout(() => {
           setCountdown(null);
-          setPhotosTaken((prev) => prev + 1);
+          // Do NOT increment here; only increment on confirm
           handleCapture();
         }, 500);
         clearInterval(timer);
@@ -134,23 +199,19 @@ const PhotoboothInterface = ({ user, onLogout }) => {
         <CardDescription>Phone: {user.phone}</CardDescription>
 
         <div className="flex-1 flex flex-col justify-center items-center gap-6">
-          {/* Live Preview */}
-          <div className="w-full h-64 bg-black rounded-lg overflow-hidden">
-            {capturedImage ? (
+          {/* Live Preview with optional captured overlay */}
+          <div className="w-full h-64 bg-black rounded-lg overflow-hidden relative">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full h-full object-cover"
+            ></video>
+            {capturedImage && (
               <img
                 src={capturedImage}
-                alt="Captured Image"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  console.error("Image failed to load:", capturedImage);
-                  e.target.src = ""; // Clear the src if the image fails to load
-                }}
-              />
-            ) : (
-              <img
-                src={`${API_BASE_URL}/video_feed?key=${livePreviewKey}`} // Add unique key to force refresh
-                alt="Live Preview"
-                className="w-full h-full object-cover"
+                alt="Captured"
+                className="absolute inset-0 w-full h-full object-cover"
               />
             )}
           </div>
@@ -165,7 +226,7 @@ const PhotoboothInterface = ({ user, onLogout }) => {
               </Button>
               <Button
                 variant="outline"
-                onClick={startPhotoshoot}
+                onClick={handleRetake}
                 className="w-full h-12"
               >
                 Retake Photo
