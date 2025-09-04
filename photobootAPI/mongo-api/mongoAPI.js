@@ -9,6 +9,11 @@ app.use(express.json());
 
 // ====== Mongo URI  ======
 const uri = process.env.MONGODB_URI;
+const port = process.env.PORT;
+if (!uri) {
+  console.warn('⚠️ Missing some Check .env file.');
+}
+console.log('[ENV]', { uri , port});
 
 // ====== Connect DB ======
 await mongoose.connect(uri, { autoIndex: true });
@@ -334,5 +339,4 @@ app.post('/api/promos/:code/redeem', async (req, res) => {
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // ====== Start Server ======
-const port = process.env.PORT;
 app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));

@@ -1,0 +1,17 @@
+{
+  "name": "photobooth-root",
+  "private": true,
+  "scripts": {
+    "mongo": "cd mongo-api && npm run dev",
+    "nextcloud": "cd nextcloud-api && npm run dev",
+    "ui": "cd photobooth-ui && npm run dev",
+    "dev": "concurrently -n mongoDB,nextcloud,ui -c green,blue,magenta \"npm run mongo\" \"npm run nextcloud\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
