@@ -1,0 +1,181 @@
+==============================    exp   ============================
+
+# เพิ่มผู้ใช้ใหม่
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/user `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"number":"123456789","pin":"0123","file_address":["C:inetpub"]}'
+
+# ค้นหาตามเบอร์ (จะเห็น file_summary)
+Invoke-RestMethod -Method GET -Uri http://localhost:3000/api/user/by-number/0980807909
+
+# เช็ค PIN (เทียบกับ hash)
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/user/check-pin `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"number":"0980807909","pin":"0123"}'
+
+# เพิ่มไฟล์ลง array
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/user/0980807909/file-address `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"file_address":["D:/photos/a.jpg","D:/photos/b.jpg"]}'
+
+# อัปเดตลิงก์ Nextcloud
+Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/user/0980807909/nextcloud-link `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"nextcloud_link":"https://nc.example.com/s/abc123"}'
+
+#เปลี่ยน PIN
+Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/user/0980807909/pin `
+  -Headers @{ "Content-Type"="application/json" } `
+  -Body '{"pin":"5678"}'
+
+
+
+====================================================================
+=========================  promo code ==============================
+Endpoint ที่มี
+
+POST /api/promos สร้างโปร
+
+GET /api/promos?active=true ดูรายการ (กรอง active ได้)
+
+GET /api/promos/:code ดูโปรตัวเดียว
+
+PATCH /api/promos/:code อัปเดตบางฟิลด์
+
+POST /api/promos/:code/deactivate ปิดโปร
+
+POST /api/promos/:code/validate ตรวจโค้ด (ไม่เขียน DB)
+
+POST /api/promos/:code/redeem ใช้โค้ด (บันทึกการใช้ + เพิ่ม used_count)
+
+*** use powershell ***
+
+ PowerShell Example Commands for PromoCode API (7 endpoints)
+
+# 1) Create promo (POST /api/promos)
+$body = @{
+  code="BOOTH100"; 
+  type="fixed"; 
+  value=1;
+  start_at="2025-09-01T00:00:00.000Z"; 
+  end_at="2025-10-31T23:59:59.999Z";
+  usage_limit=500; 
+  per_user_limit=1; 
+  is_active=$true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos `
+  -ContentType "application/json" -Body $body
+
+
+# 2) List all promos (GET /api/promos)
+Invoke-RestMethod -Method GET -Uri http://localhost:3000/api/promos
+
+# Only active promos
+Invoke-RestMethod -Method GET -Uri "http://localhost:3000/api/promos?active=true"
+
+
+# 3) Get promo by code (GET /api/promos/:code)
+Invoke-RestMethod -Method GET -Uri http://localhost:3000/api/promos/BOOTH50
+
+
+# 4) Update promo (PATCH /api/promos/:code)
+$update = @{ value=100 } | ConvertTo-Json
+Invoke-RestMethod -Method PATCH -Uri http://localhost:3000/api/promos/BOOTH50 `
+  -ContentType "application/json" -Body $update
+
+
+# 5) Deactivate promo (POST /api/promos/:code/deactivate)
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos/BOOTH50/deactivate
+
+
+# 6) Validate promo (POST /api/promos/:code/validate)
+$validate = @{ userNumber="0980807909"; orderAmount=300 } | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos/BOOTH50/validate `
+  -ContentType "application/json" -Body $validate
+
+
+# 7) Redeem promo (POST /api/promos/:code/redeem)
+$redeem = @{ userNumber="123456789"; orderAmount=300 } | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri http://localhost:3000/api/promos/BOOTH100/redeem `
+  -ContentType "application/json" -Body $redeem
+
+
+
+====================================================================
+
+============================React (ใช้ fetch)========================
+
+
+import React, { useState } from "react";
+
+function App() {
+  const [result, setResult] = useState(null);
+
+  // 1) เพิ่มผู้ใช้ใหม่
+  const addUser = async () => {
+    const res = await fetch("http://localhost:3000/api/user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        number: "0980807909",
+        pin: "0123",
+        file_address: ["C:inetpub", "C:LDPlayer"],
+        nextcloud_link: "https://nc.example.com/s/abc123",
+      }),
+    });
+    setResult(await res.json());
+  };
+
+  // 2) ค้นหาด้วยเบอร์
+  const getUser = async () => {
+    const res = await fetch("http://localhost:3000/api/user/by-number/0980807909");
+    setResult(await res.json());
+  };
+
+  // 3) เช็ค PIN
+  const checkPin = async () => {
+    const res = await fetch("http://localhost:3000/api/user/check-pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ number: "0980807909", pin: "0123" }),
+    });
+    setResult(await res.json());
+  };
+
+  // 4) เพิ่มไฟล์ใน file_address
+  const addFile = async () => {
+    const res = await fetch("http://localhost:3000/api/user/0980807909/file-address", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_address: "D:/photos/new.jpg" }),
+    });
+    setResult(await res.json());
+  };
+
+  // 5) อัปเดต nextcloud_link
+  const updateNextcloudLink = async () => {
+    const res = await fetch("http://localhost:3000/api/user/0980807909/nextcloud-link", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nextcloud_link: "https://nc.example.com/s/xyz456" }),
+    });
+    setResult(await res.json());
+  };
+
+  return (
+    <div>
+      <button onClick={addUser}>เพิ่มผู้ใช้</button>
+      <button onClick={getUser}>ค้นหาผู้ใช้</button>
+      <button onClick={checkPin}>เช็ค PIN</button>
+      <button onClick={addFile}>เพิ่มไฟล์</button>
+      <button onClick={updateNextcloudLink}>อัปเดตลิงก์</button>
+
+      <pre>{result && JSON.stringify(result, null, 2)}</pre>
+    </div>
+  );
+}
+
+export default App;
+
+====================================================================

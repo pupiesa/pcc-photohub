@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Photobooth Demo — Simple Web</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121a33; --ink:#e8eefc; --muted:#a9b4d6; --acc:#6aa7ff; --ok:#3ad29f; --err:#ff6b6b; }
+    html,body{height:100%}
+    body{margin:0; background:linear-gradient(180deg,#0b1020,#0e1430 40%,#0b1020); color:var(--ink); font:15px/1.4 system-ui,Segoe UI,Roboto,Arial;}
+    .wrap{max-width:1000px; margin:24px auto; padding:0 16px}
+    h1{font-size:22px; letter-spacing:.3px;}
+    .grid{display:grid; grid-template-columns:1fr; gap:14px}
+    @media(min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
+    .card{background:var(--card); border:1px solid #1b2550; border-radius:16px; box-shadow:0 8px 24px rgba(0,0,0,.35); padding:16px}
+    .title{display:flex; align-items:center; gap:8px; font-weight:700; margin-bottom:10px}
+    .row{display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; margin:6px 0}
+    label{color:var(--muted)}
+    input,select{background:#0e1530; color:var(--ink); border:1px solid #253066; border-radius:10px; outline:none; padding:10px 12px}
+    input:focus{border-color:#3b57c7; box-shadow:0 0 0 3px rgba(106,167,255,.2)}
+    .btns{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
+    button{background:#17306b; color:#eef3ff; border:1px solid #2b4aa1; border-radius:12px; padding:10px 14px; cursor:pointer}
+    button:hover{filter:brightness(1.1)}
+    button.ok{background:#0f5d4d; border-color:#12836b}
+    button.warn{background:#6b2f17; border-color:#b05a2d}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+    pre{background:#091028; color:#dce7ff; border:1px solid #1b2550; border-radius:12px; padding:14px; max-height:320px; overflow:auto}
+    small{color:var(--muted)}
+    .footer{opacity:.8; margin-top:14px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>📸 Photobooth Demo — Simple Web</h1>
+    <div class="card">
+      <div class="title">🔧 ตั้งค่า API</div>
+      <div class="row"><label>Mongo API URL</label><input id="mongoBase" value="http://localhost:2000"/></div>
+      <div class="row"><label>Nextcloud API URL</label><input id="ncBase" value="http://localhost:3000"/></div>
+      <div class="btns"><button id="saveCfg">Save</button><small>บันทึกค่าไว้ใน browser</small></div>
+    </div>
+
+    <div class="grid" style="margin-top:14px">
+      <div class="card">
+        <div class="title">1) Ensure User & Check PIN</div>
+        <div class="row"><label>เบอร์ (number)</label><input id="u_number" placeholder="0912345678"/></div>
+        <div class="row"><label>PIN</label><input id="u_pin" placeholder="1234"/></div>
+        <div class="btns">
+          <button id="btnEnsure" class="ok">✅ Ensure & Check PIN</button>
+          <button id="btnGetUser">แค่ Get User</button>
+          <button id="btnCreateUser">Create User</button>
+          <button id="btnCheckPin">Check PIN</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="title">2) Upload รูป</div>
+        <div class="row"><label>เบอร์ (ใช้เป็นโฟลเดอร์)</label><input id="up_number" placeholder="0912345678"/></div>
+        <div class="row"><label>Folder Name</label><input id="up_folder" placeholder="เช่น เบอร์โทร"/></div>
+        <div class="row"><label>File Path (บนเครื่องเซิร์ฟเวอร์)</label><input id="up_file" placeholder="C:\\Users\\me\\Pictures\\test.jpg"/></div>
+        <div class="row"><label>Note</label><input id="up_note" value="ProjectPhoto_PCC"/></div>
+        <div class="row"><label>Link Password</label><input id="up_pass" placeholder="เว้นว่างได้"/></div>
+        <div class="row"><label>Expire (YYYY-MM-DD)</label><input id="up_exp" placeholder="2026-12-31"/></div>
+        <div class="btns">
+          <button id="btnFlowUpload" class="ok">🚀 Upload Flow (auto choose)</button>
+          <button id="btnUploadShare">Upload+Share</button>
+          <button id="btnUploadOnly">Upload Only</button>
+        </div>
+        <small>หมายเหตุ: endpoint ปัจจุบันอ่าน <b>filePath จากฝั่งเซิร์ฟเวอร์</b>. ให้ใส่พาธของไฟล์ที่เครื่องรัน nextcloud-api</small>
+      </div>
+
+      <div class="card">
+        <div class="title">3) Promo</div>
+        <div class="row"><label>Code</label><input id="pm_code" value="WELCOME10"/></div>
+        <div class="row"><label>Type</label>
+          <select id="pm_type">
+            <option value="percent">percent</option>
+            <option value="fixed">fixed</option>
+          </select>
+        </div>
+        <div class="row"><label>Value</label><input id="pm_value" type="number" value="10"/></div>
+        <div class="row"><label>Order Amount</label><input id="pm_amt" type="number" value="500"/></div>
+        <div class="btns">
+          <button id="btnPromoCreate">Create</button>
+          <button id="btnPromoValidate" class="ok">Validate</button>
+          <button id="btnPromoRedeem">Redeem</button>
+          <button id="btnPromoList">List active</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="title">📜 Log</div>
+        <pre id="log" class="mono">Ready.</pre>
+        <div class="btns"><button id="clearLog" class="warn">Clear Log</button></div>
+        <div class="footer"><small>Tip: ถ้า CORS error ให้เปิด CORS ใน mongo-api (ดูคำแนะนำใต้หน้าต่างแชท)</small></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ===== PhotoboothClient (ย่อ/ฝังในไฟล์เดียว) =====
+    class PhotoboothClient {
+      constructor({ mongoBase, ncBase }) { this.mongo = mongoBase.replace(/\/$/, ''); this.nc = ncBase.replace(/\/$/, ''); }
+      // USER
+      getUserByNumber(n){return this._get(`${this.mongo}/api/user/by-number/${encodeURIComponent(n)}`)}
+      createUser(b){return this._post(`${this.mongo}/api/user`, b)}
+      checkPin(b){return this._post(`${this.mongo}/api/user/check-pin`, b)}
+      setNextcloudLink(n,link){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/nextcloud-link`,{nextcloud_link:link})}
+      appendFileAddress(n,f){return this._post(`${this.mongo}/api/user/${encodeURIComponent(n)}/file-address`,{file_address:f})}
+      changePin(n,p){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/pin`,{pin:p})}
+      // PROMO
+      listPromos({active}={}){const q=active?"?active=true":"";return this._get(`${this.mongo}/api/promos${q}`)}
+      createPromo(b){return this._post(`${this.mongo}/api/promos`,b)}
+      getPromo(c){return this._get(`${this.mongo}/api/promos/${encodeURIComponent(c)}`)}
+      updatePromo(c,b){return this._patch(`${this.mongo}/api/promos/${encodeURIComponent(c)}`,b)}
+      deactivatePromo(c){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/deactivate`)}
+      validatePromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/validate`,b)}
+      redeemPromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/redeem`,b)}
+      // NEXTCLOUD
+      uploadAndShare(b){return this._post(`${this.nc}/api/nextcloud/upload-and-share`,b)}
+      uploadOnly(b){return this._post(`${this.nc}/api/nextcloud/upload`,b)}
+      // ORCHESTRATIONS
+      async ensureUserAndPin({number,pin}){
+        let user=null; try{const r=await this.getUserByNumber(number); user=r.data;}catch(e){if(e.status!==404) throw e}
+        if(!user){await this.createUser({number,pin}); user=(await this.getUserByNumber(number)).data}
+        const {match}=await this.checkPin({number,pin}); if(!match){const er=new Error('PIN_NOT_MATCH'); er.status=401; throw er}
+        return user
+      }
+      async uploadImageForUser({number,filePath,folderName,note,linkPassword,expiration}){
+        const found=await this.getUserByNumber(number); const user=found.data;
+        if(!user.nextcloud_link){
+          const up=await this.uploadAndShare({folderName,filePath,note,linkPassword,expiration});
+          await this.setNextcloudLink(number, up?.share?.url);
+        } else {
+          await this.uploadOnly({folderName,filePath});
+        }
+        await this.appendFileAddress(number,filePath);
+        const latest=await this.getUserByNumber(number);
+        return { nextcloud_link: latest.data.nextcloud_link, file_count: latest.file_summary?.count ?? (latest.data.file_address?.length ?? 0), last_file: filePath };
+      }
+      // fetch helpers
+      async _get(u){const r=await fetch(u);return this._handle(r)}
+      async _post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return this._handle(r)}
+      async _patch(u,b){const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return this._handle(r)}
+      async _handle(r){ let data=null; try{data=await r.json()}catch{data={}} if(!r.ok || data?.ok===false){const e=new Error(data?.message||data?.error||`HTTP_${r.status}`); e.status=r.status; e.payload=data; throw e} return data }
+    }
+
+    // ===== Utilities =====
+    const $ = (sel) => document.querySelector(sel);
+    const logEl = $('#log');
+    function log(title, data){ const t = (typeof data==='string')? data : JSON.stringify(data, null, 2); logEl.textContent += `\n\n› ${title}\n` + t; logEl.scrollTop = logEl.scrollHeight; }
+    function clearLog(){ logEl.textContent = 'Ready.'; }
+
+    // Load/save config
+    const cfgEls = { mongoBase: $('#mongoBase'), ncBase: $('#ncBase') };
+    const saved = JSON.parse(localStorage.getItem('pb_cfg')||'{}');
+    if(saved.mongoBase) cfgEls.mongoBase.value=saved.mongoBase;
+    if(saved.ncBase) cfgEls.ncBase.value=saved.ncBase;
+    $('#saveCfg').onclick=()=>{ localStorage.setItem('pb_cfg', JSON.stringify({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value })); log('Saved config', localStorage.getItem('pb_cfg')); };
+
+    function getApi(){ return new PhotoboothClient({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value }); }
+
+    // ===== Section 1 events =====
+    $('#btnEnsure').onclick = async () => {
+      const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
+      try{ const res = await api.ensureUserAndPin({number,pin}); log('Ensure & Check OK', res); $('#up_number').value=number; $('#up_folder').value=number; }
+      catch(e){ log('Ensure error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+    $('#btnGetUser').onclick = async () => { const number=$('#u_number').value.trim(); const api=getApi(); try{ log('GetUser', await api.getUserByNumber(number)); } catch(e){ log('GetUser error', {status:e.status, message:e.message}); } };
+    $('#btnCreateUser').onclick = async () => { const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi(); try{ log('CreateUser', await api.createUser({number,pin})); } catch(e){ log('CreateUser error', {status:e.status, message:e.message, payload:e.payload}); } };
+    $('#btnCheckPin').onclick = async () => { const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi(); try{ log('CheckPin', await api.checkPin({number,pin})); } catch(e){ log('CheckPin error', {status:e.status, message:e.message}); } };
+
+    // ===== Section 2 events =====
+    $('#btnFlowUpload').onclick = async () => {
+      const api=getApi(); const number=$('#up_number').value.trim(); const folder=$('#up_folder').value.trim()||number; const file=$('#up_file').value.trim(); const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
+      try { const r = await api.uploadImageForUser({ number, filePath:file, folderName:folder, note, linkPassword, expiration }); log('Upload Flow result', r); }
+      catch(e){ log('Upload Flow error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+    $('#btnUploadShare').onclick = async () => {
+      const api=getApi(); const folder=$('#up_folder').value.trim()||$('#up_number').value.trim(); const file=$('#up_file').value.trim(); const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
+      try{ const r = await api.uploadAndShare({ folderName:folder, filePath:file, note, linkPassword, expiration }); log('Upload+Share', r); if(r?.share?.url){ const number=$('#up_number').value.trim(); await api.setNextcloudLink(number, r.share.url); log('Patched nextcloud_link to user', {number, link:r.share.url}); } }
+      catch(e){ log('Upload+Share error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+    $('#btnUploadOnly').onclick = async () => {
+      const api=getApi(); const folder=$('#up_folder').value.trim()||$('#up_number').value.trim(); const file=$('#up_file').value.trim();
+      try{ const r = await api.uploadOnly({ folderName:folder, filePath:file }); log('UploadOnly', r); const number=$('#up_number').value.trim(); await api.appendFileAddress(number, file); log('Append file_address', {number, file}); }
+      catch(e){ log('UploadOnly error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+
+    // ===== Section 3 events =====
+    $('#btnPromoCreate').onclick = async () => {
+      const api=getApi(); const code=$('#pm_code').value.trim(); const type=$('#pm_type').value; const value=Number($('#pm_value').value||0);
+      try{ const now=new Date(); const end=new Date(Date.now()+86400000*30); const body={ code, type, value, start_at: now, end_at: end, usage_limit:1000, per_user_limit:1, is_active:true }; const r=await api.createPromo(body); log('Promo created', r); }
+      catch(e){ log('Promo create error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+    $('#btnPromoValidate').onclick = async () => {
+      const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
+      try{ const r=await api.validatePromo(code,{userNumber:number, orderAmount:amt}); log('Promo validate', r); }
+      catch(e){ log('Promo validate error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+    $('#btnPromoRedeem').onclick = async () => {
+      const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
+      try{ const r=await api.redeemPromo(code,{userNumber:number, orderAmount:amt}); log('Promo redeem', r); }
+      catch(e){ log('Promo redeem error', {status:e.status, message:e.message, payload:e.payload}); }
+    };
+    $('#btnPromoList').onclick = async () => { const api=getApi(); try{ log('Promo list (active)', await api.listPromos({active:true})); } catch(e){ log('Promo list error', {status:e.status, message:e.message}); } };
+
+    // Log helpers
+    $('#clearLog').onclick = clearLog;
+  </script>
+</body>
+</html>
