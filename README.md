@@ -12,6 +12,16 @@ yarn dev
 pnpm dev
 # or
 bun dev
+======= how to run API ======
+API_Server
+1. cd .\photobootAPI\
+2. npm run dev
+
+API_Webdemo
+1.  cd .\photobootAPI\examples\web-demo\
+2.  npx http-server -p 5173 .
+=============================
+
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
