@@ -45,6 +45,7 @@
         <div class="row"><label>เบอร์ (number)</label><input id="u_number" placeholder="0912345678"/></div>
         <div class="row"><label>PIN</label><input id="u_pin" placeholder="1234"/></div>
         <div class="btns">
+          <button id="btnEnsureUserOnly">Ensure User Only (create if missing)</button>
           <button id="btnEnsure" class="ok">✅ Ensure & Check PIN</button>
           <button id="btnGetUser">แค่ Get User</button>
           <button id="btnCreateUser">Create User</button>
@@ -96,116 +97,264 @@
     </div>
   </div>
 
-  <script type="module">
-    // ===== PhotoboothClient (ย่อ/ฝังในไฟล์เดียว) =====
-    class PhotoboothClient {
-      constructor({ mongoBase, ncBase }) { this.mongo = mongoBase.replace(/\/$/, ''); this.nc = ncBase.replace(/\/$/, ''); }
-      // USER
-      getUserByNumber(n){return this._get(`${this.mongo}/api/user/by-number/${encodeURIComponent(n)}`)}
-      createUser(b){return this._post(`${this.mongo}/api/user`, b)}
-      checkPin(b){return this._post(`${this.mongo}/api/user/check-pin`, b)}
-      setNextcloudLink(n,link){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/nextcloud-link`,{nextcloud_link:link})}
-      appendFileAddress(n,f){return this._post(`${this.mongo}/api/user/${encodeURIComponent(n)}/file-address`,{file_address:f})}
-      changePin(n,p){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/pin`,{pin:p})}
-      // PROMO
-      listPromos({active}={}){const q=active?"?active=true":"";return this._get(`${this.mongo}/api/promos${q}`)}
-      createPromo(b){return this._post(`${this.mongo}/api/promos`,b)}
-      getPromo(c){return this._get(`${this.mongo}/api/promos/${encodeURIComponent(c)}`)}
-      updatePromo(c,b){return this._patch(`${this.mongo}/api/promos/${encodeURIComponent(c)}`,b)}
-      deactivatePromo(c){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/deactivate`)}
-      validatePromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/validate`,b)}
-      redeemPromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/redeem`,b)}
-      // NEXTCLOUD
-      uploadAndShare(b){return this._post(`${this.nc}/api/nextcloud/upload-and-share`,b)}
-      uploadOnly(b){return this._post(`${this.nc}/api/nextcloud/upload`,b)}
-      // ORCHESTRATIONS
-      async ensureUserAndPin({number,pin}){
-        let user=null; try{const r=await this.getUserByNumber(number); user=r.data;}catch(e){if(e.status!==404) throw e}
-        if(!user){await this.createUser({number,pin}); user=(await this.getUserByNumber(number)).data}
-        const {match}=await this.checkPin({number,pin}); if(!match){const er=new Error('PIN_NOT_MATCH'); er.status=401; throw er}
-        return user
+<script type="module">
+  // ===== PhotoboothClient (ย่อ/ฝังในไฟล์เดียว) =====
+  class PhotoboothClient {
+    constructor({ mongoBase, ncBase }) {
+      this.mongo = mongoBase.replace(/\/$/, '');
+      this.nc = ncBase.replace(/\/$/, '');
+    }
+    // USER
+    getUserByNumber(n){return this._get(`${this.mongo}/api/user/by-number/${encodeURIComponent(n)}`)}
+    createUser(b){return this._post(`${this.mongo}/api/user`, b)}
+    checkPin(b){return this._post(`${this.mongo}/api/user/check-pin`, b)}
+    setNextcloudLink(n,link){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/nextcloud-link`,{nextcloud_link:link})}
+    appendFileAddress(n,f){return this._post(`${this.mongo}/api/user/${encodeURIComponent(n)}/file-address`,{file_address:f})}
+    changePin(n,p){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/pin`,{pin:p})}
+    // PROMO
+    listPromos({active}={}){const q=active?"?active=true":"";return this._get(`${this.mongo}/api/promos${q}`)}
+    createPromo(b){return this._post(`${this.mongo}/api/promos`,b)}
+    getPromo(c){return this._get(`${this.mongo}/api/promos/${encodeURIComponent(c)}`)}
+    updatePromo(c,b){return this._patch(`${this.mongo}/api/promos/${encodeURIComponent(c)}`,b)}
+    deactivatePromo(c){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/deactivate`)}
+    validatePromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/validate`,b)}
+    redeemPromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/redeem`,b)}
+    // NEXTCLOUD
+    uploadAndShare(b){return this._post(`${this.nc}/api/nextcloud/upload-and-share`,b)}
+    uploadOnly(b){return this._post(`${this.nc}/api/nextcloud/upload`,b)}
+    // ORCHESTRATIONS
+    async ensureUserAndPin({number,pin}){
+      let user=null; try{const r=await this.getUserByNumber(number); user=r.data;}catch(e){if(e.status!==404) throw e}
+      if(!user){await this.createUser({number,pin}); user=(await this.getUserByNumber(number)).data}
+      const {match}=await this.checkPin({number,pin}); if(!match){const er=new Error('PIN_NOT_MATCH'); er.status=401; throw er}
+      return user;
+    }
+    async ensureUserOnly({number,pin}){
+      try { await this.getUserByNumber(number); return {created:false}; }
+      catch(e){
+        if(e.status!==404) throw e;
+        await this.createUser({number,pin});
+        return {created:true};
       }
-      async uploadImageForUser({number,filePath,folderName,note,linkPassword,expiration}){
-        const found=await this.getUserByNumber(number); const user=found.data;
-        if(!user.nextcloud_link){
-          const up=await this.uploadAndShare({folderName,filePath,note,linkPassword,expiration});
-          await this.setNextcloudLink(number, up?.share?.url);
-        } else {
-          await this.uploadOnly({folderName,filePath});
-        }
-        await this.appendFileAddress(number,filePath);
-        const latest=await this.getUserByNumber(number);
-        return { nextcloud_link: latest.data.nextcloud_link, file_count: latest.file_summary?.count ?? (latest.data.file_address?.length ?? 0), last_file: filePath };
-      }
-      // fetch helpers
-      async _get(u){const r=await fetch(u);return this._handle(r)}
-      async _post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return this._handle(r)}
-      async _patch(u,b){const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return this._handle(r)}
-      async _handle(r){ let data=null; try{data=await r.json()}catch{data={}} if(!r.ok || data?.ok===false){const e=new Error(data?.message||data?.error||`HTTP_${r.status}`); e.status=r.status; e.payload=data; throw e} return data }
     }
 
-    // ===== Utilities =====
-    const $ = (sel) => document.querySelector(sel);
-    const logEl = $('#log');
-    function log(title, data){ const t = (typeof data==='string')? data : JSON.stringify(data, null, 2); logEl.textContent += `\n\n› ${title}\n` + t; logEl.scrollTop = logEl.scrollHeight; }
-    function clearLog(){ logEl.textContent = 'Ready.'; }
+    // >>> อัปโหลดหลายไฟล์ + บันทึก file_address เป็นพาธบน Nextcloud
+    async uploadImagesForUser({ number, filePaths, folderName, note, linkPassword, expiration }) {
+      if (!Array.isArray(filePaths) || filePaths.length===0) {
+        throw new Error('filePaths is required (array)');
+      }
+      // user
+      const found=await this.getUserByNumber(number);
+      const user=found.data;
 
-    // Load/save config
-    const cfgEls = { mongoBase: $('#mongoBase'), ncBase: $('#ncBase') };
-    const saved = JSON.parse(localStorage.getItem('pb_cfg')||'{}');
-    if(saved.mongoBase) cfgEls.mongoBase.value=saved.mongoBase;
-    if(saved.ncBase) cfgEls.ncBase.value=saved.ncBase;
-    $('#saveCfg').onclick=()=>{ localStorage.setItem('pb_cfg', JSON.stringify({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value })); log('Saved config', localStorage.getItem('pb_cfg')); };
+      // helper: ดึงพาธบน Nextcloud จาก response
+      const toCloudPath = (resp) => {
+        const up     = resp?.uploaded || resp || {};
+        const remote = up.remotePath || up.remote || '';
+        const folder = up.folder || up.folderPath || '';
+        const file   = up.file || up.fileName || '';
+        if (remote) {
+          if (file && !remote.endsWith(file)) return `${remote.replace(/\/$/, '')}/${file}`;
+          return remote;
+        }
+        if (folder && file) return `${String(folder).replace(/\/$/, '')}/${file}`;
+        return file || folder || null;
+      };
 
-    function getApi(){ return new PhotoboothClient({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value }); }
+      const cloudPaths = [];
+      if (!user.nextcloud_link) {
+        // 1) ไฟล์แรก: upload+share เพื่อสร้าง/รีใช้ลิงก์
+        const first = filePaths[0];
+        const up1 = await this.uploadAndShare({ folderName, filePath: first, note, linkPassword, expiration });
+        if (up1?.share?.url) await this.setNextcloudLink(number, up1.share.url);
+        cloudPaths.push(toCloudPath(up1) || first);
+        // 2) ที่เหลือ: upload only
+        for (const fp of filePaths.slice(1)) {
+          const up = await this.uploadOnly({ folderName, filePath: fp });
+          cloudPaths.push(toCloudPath(up) || fp);
+        }
+      } else {
+        // มีลิงก์แล้ว: upload only ทุกไฟล์
+        for (const fp of filePaths) {
+          const up = await this.uploadOnly({ folderName, filePath: fp });
+          cloudPaths.push(toCloudPath(up) || fp);
+        }
+      }
 
-    // ===== Section 1 events =====
-    $('#btnEnsure').onclick = async () => {
-      const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
-      try{ const res = await api.ensureUserAndPin({number,pin}); log('Ensure & Check OK', res); $('#up_number').value=number; $('#up_folder').value=number; }
-      catch(e){ log('Ensure error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
-    $('#btnGetUser').onclick = async () => { const number=$('#u_number').value.trim(); const api=getApi(); try{ log('GetUser', await api.getUserByNumber(number)); } catch(e){ log('GetUser error', {status:e.status, message:e.message}); } };
-    $('#btnCreateUser').onclick = async () => { const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi(); try{ log('CreateUser', await api.createUser({number,pin})); } catch(e){ log('CreateUser error', {status:e.status, message:e.message, payload:e.payload}); } };
-    $('#btnCheckPin').onclick = async () => { const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi(); try{ log('CheckPin', await api.checkPin({number,pin})); } catch(e){ log('CheckPin error', {status:e.status, message:e.message}); } };
+      // append ลง DB ทีเดียว
+      await this.appendFileAddress(number, cloudPaths);
 
-    // ===== Section 2 events =====
-    $('#btnFlowUpload').onclick = async () => {
-      const api=getApi(); const number=$('#up_number').value.trim(); const folder=$('#up_folder').value.trim()||number; const file=$('#up_file').value.trim(); const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
-      try { const r = await api.uploadImageForUser({ number, filePath:file, folderName:folder, note, linkPassword, expiration }); log('Upload Flow result', r); }
-      catch(e){ log('Upload Flow error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
-    $('#btnUploadShare').onclick = async () => {
-      const api=getApi(); const folder=$('#up_folder').value.trim()||$('#up_number').value.trim(); const file=$('#up_file').value.trim(); const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
-      try{ const r = await api.uploadAndShare({ folderName:folder, filePath:file, note, linkPassword, expiration }); log('Upload+Share', r); if(r?.share?.url){ const number=$('#up_number').value.trim(); await api.setNextcloudLink(number, r.share.url); log('Patched nextcloud_link to user', {number, link:r.share.url}); } }
-      catch(e){ log('Upload+Share error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
-    $('#btnUploadOnly').onclick = async () => {
-      const api=getApi(); const folder=$('#up_folder').value.trim()||$('#up_number').value.trim(); const file=$('#up_file').value.trim();
-      try{ const r = await api.uploadOnly({ folderName:folder, filePath:file }); log('UploadOnly', r); const number=$('#up_number').value.trim(); await api.appendFileAddress(number, file); log('Append file_address', {number, file}); }
-      catch(e){ log('UploadOnly error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
+      // สรุป
+      const latest=await this.getUserByNumber(number);
+      return {
+        nextcloud_link: latest.data.nextcloud_link,
+        file_count: latest.file_summary?.count ?? (latest.data.file_address?.length ?? 0),
+        last_files: cloudPaths
+      };
+    }
 
-    // ===== Section 3 events =====
-    $('#btnPromoCreate').onclick = async () => {
-      const api=getApi(); const code=$('#pm_code').value.trim(); const type=$('#pm_type').value; const value=Number($('#pm_value').value||0);
-      try{ const now=new Date(); const end=new Date(Date.now()+86400000*30); const body={ code, type, value, start_at: now, end_at: end, usage_limit:1000, per_user_limit:1, is_active:true }; const r=await api.createPromo(body); log('Promo created', r); }
-      catch(e){ log('Promo create error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
-    $('#btnPromoValidate').onclick = async () => {
-      const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
-      try{ const r=await api.validatePromo(code,{userNumber:number, orderAmount:amt}); log('Promo validate', r); }
-      catch(e){ log('Promo validate error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
-    $('#btnPromoRedeem').onclick = async () => {
-      const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
-      try{ const r=await api.redeemPromo(code,{userNumber:number, orderAmount:amt}); log('Promo redeem', r); }
-      catch(e){ log('Promo redeem error', {status:e.status, message:e.message, payload:e.payload}); }
-    };
-    $('#btnPromoList').onclick = async () => { const api=getApi(); try{ log('Promo list (active)', await api.listPromos({active:true})); } catch(e){ log('Promo list error', {status:e.status, message:e.message}); } };
+    // fetch helpers
+    async _get(u){const r=await fetch(u);return this._handle(r)}
+    async _post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return this._handle(r)}
+    async _patch(u,b){const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return this._handle(r)}
+    async _handle(r){ let data=null; try{data=await r.json()}catch{data={}} if(!r.ok || data?.ok===false){const e=new Error(data?.message||data?.error||`HTTP_${r.status}`); e.status=r.status; e.payload=data; throw e} return data }
+  }
 
-    // Log helpers
-    $('#clearLog').onclick = clearLog;
-  </script>
+  // ===== Utilities =====
+  const $ = (sel) => document.querySelector(sel);
+  const logEl = $('#log');
+  function log(title, data){ const t = (typeof data==='string')? data : JSON.stringify(data, null, 2); logEl.textContent += `\n\n› ${title}\n` + t; logEl.scrollTop = logEl.scrollHeight; }
+  function clearLog(){ logEl.textContent = 'Ready.'; }
+  function splitPaths(input){
+    const s=(input||'').trim();
+    if(!s) return [];
+    // รองรับคั่นด้วย comma หรือขึ้นบรรทัดใหม่ หรือ |
+    return s.split(/[,|\r?\n]+/).map(t=>t.trim()).filter(Boolean);
+  }
+
+  // Load/save config
+  const cfgEls = { mongoBase: $('#mongoBase'), ncBase: $('#ncBase') };
+  const saved = JSON.parse(localStorage.getItem('pb_cfg')||'{}');
+  if(saved.mongoBase) cfgEls.mongoBase.value=saved.mongoBase;
+  if(saved.ncBase) cfgEls.ncBase.value=saved.ncBase;
+  $('#saveCfg').onclick=()=>{ localStorage.setItem('pb_cfg', JSON.stringify({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value })); log('Saved config', localStorage.getItem('pb_cfg')); };
+
+  function getApi(){ return new PhotoboothClient({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value }); }
+
+  // ===== Section 1 events =====
+  $('#btnEnsure').onclick = async () => {
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
+    try{ const res = await api.ensureUserAndPin({number,pin}); log('Ensure & Check OK', res); $('#up_number').value=number; $('#up_folder').value=number; }
+    catch(e){ log('Ensure error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnEnsureUserOnly').onclick = async () => {
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
+    try{ const r=await api.ensureUserOnly({number,pin}); log('Ensure User Only', r); $('#up_number').value=number; $('#up_folder').value=number; }
+    catch(e){ log('EnsureUserOnly error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnGetUser').onclick = async () => {
+    const number=$('#u_number').value.trim(); const api=getApi();
+    try{ log('GetUser', await api.getUserByNumber(number)); }
+    catch(e){ log('GetUser error', {status:e.status, message:e.message}); }
+  };
+  $('#btnCreateUser').onclick = async () => {
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
+    try{ log('CreateUser', await api.createUser({number,pin})); }
+    catch(e){ log('CreateUser error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnCheckPin').onclick = async () => {
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
+    try{ log('CheckPin', await api.checkPin({number,pin})); }
+    catch(e){ log('CheckPin error', {status:e.status, message:e.message}); }
+  };
+
+  // ===== Section 2 events =====
+  $('#btnFlowUpload').onclick = async () => {
+    const api=getApi();
+    const number=$('#up_number').value.trim();
+    const folder=$('#up_folder').value.trim()||number;
+    const fileInput=$('#up_file').value;
+    const filePaths=splitPaths(fileInput);
+    const note=$('#up_note').value;
+    const linkPassword=$('#up_pass').value;
+    const expiration=$('#up_exp').value || undefined;
+
+    try {
+      if (filePaths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
+      const r = await api.uploadImagesForUser({ number, filePaths, folderName:folder, note, linkPassword, expiration });
+      log('Upload Flow result', r);
+
+      // ตรวจผลจาก DB
+      const latest = await api.getUserByNumber(number);
+      log('GetUser after', latest);
+    } catch(e){
+      log('Upload Flow error', {status:e.status, message:e.message, payload:e.payload});
+    }
+  };
+
+  $('#btnUploadShare').onclick = async () => {
+    const api=getApi();
+    const number=$('#up_number').value.trim();
+    const folder=$('#up_folder').value.trim() || number;
+    const filePaths=splitPaths($('#up_file').value);
+    const first = filePaths[0];
+    const note=$('#up_note').value;
+    const linkPassword=$('#up_pass').value;
+    const expiration=$('#up_exp').value || undefined;
+
+    try{
+      if(!first) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์ (ไฟล์แรกจะถูกใช้แชร์ลิงก์)');
+      const r = await api.uploadAndShare({ folderName:folder, filePath:first, note, linkPassword, expiration });
+      log('Upload+Share', r);
+
+      if(r?.share?.url){
+        await api.setNextcloudLink(number, r.share.url);
+        log('Patched nextcloud_link to user', {number, link:r.share.url});
+      }
+
+      // บันทึก file_address ด้วย remotePath
+      const remote = r?.uploaded?.remotePath || `${r?.uploaded?.folder}/${r?.uploaded?.file}`;
+      if (remote) {
+        await api.appendFileAddress(number, [remote]);
+        log('Append file_address', {number, files:[remote]});
+      }
+    } catch(e){
+      log('Upload+Share error', {status:e.status, message:e.message, payload:e.payload});
+    }
+  };
+
+  $('#btnUploadOnly').onclick = async () => {
+    const api=getApi();
+    const number=$('#up_number').value.trim();
+    const folder=$('#up_folder').value.trim()||number;
+    const filePaths=splitPaths($('#up_file').value);
+
+    try{
+      if (filePaths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
+      const remotes = [];
+      for (const fp of filePaths) {
+        const r = await api.uploadOnly({ folderName:folder, filePath:fp });
+        log('UploadOnly', r);
+        const remote = r?.uploaded?.remotePath || `${r?.uploaded?.folder}/${r?.uploaded?.file}`;
+        if (remote) remotes.push(remote);
+      }
+      if (remotes.length) {
+        await api.appendFileAddress(number, remotes);
+        log('Append file_address', {number, files: remotes});
+      }
+    } catch(e){
+      log('UploadOnly error', {status:e.status, message:e.message, payload:e.payload});
+    }
+  };
+
+  // ===== Section 3 events =====
+  $('#btnPromoCreate').onclick = async () => {
+    const api=getApi(); const code=$('#pm_code').value.trim(); const type=$('#pm_type').value; const value=Number($('#pm_value').value||0);
+    try{
+      const now=new Date(); const end=new Date(Date.now()+86400000*30);
+      const body={ code, type, value, start_at: now, end_at: end, usage_limit:1000, per_user_limit:1, is_active:true };
+      const r=await api.createPromo(body); log('Promo created', r);
+    } catch(e){ log('Promo create error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnPromoValidate').onclick = async () => {
+    const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
+    try{ const r=await api.validatePromo(code,{userNumber:number, orderAmount:amt}); log('Promo validate', r); }
+    catch(e){ log('Promo validate error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnPromoRedeem').onclick = async () => {
+    const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
+    try{ const r=await api.redeemPromo(code,{userNumber:number, orderAmount:amt}); log('Promo redeem', r); }
+    catch(e){ log('Promo redeem error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnPromoList').onclick = async () => {
+    const api=getApi();
+    try{ log('Promo list (active)', await api.listPromos({active:true})); }
+    catch(e){ log('Promo list error', {status:e.status, message:e.message}); }
+  };
+
+  // Log helpers
+  $('#clearLog').onclick = clearLog;
+</script>
+
 </body>
 </html>

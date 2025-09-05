@@ -67,6 +67,19 @@ async function maybeUpdateShare(shareId, { note, linkPassword, expiration, permi
   });
 }
 
+function pickFirstPath({ filePath, filePaths }) {
+  if (Array.isArray(filePaths) && filePaths.length) return String(filePaths[0]).trim();
+  if (Array.isArray(filePath) && filePath.length)   return String(filePath[0]).trim();
+  if (typeof filePath === 'string') {
+    const s = filePath.trim();
+    if (!s) return '';
+    const parts = s.split(/[,|\r?\n]+/).map(t => t.trim()).filter(Boolean);
+    return parts[0] || '';
+  }
+  return '';
+}
+
+
 // ==== Upload + Share (no QR) with de-dup ====
 app.post('/api/nextcloud/upload-and-share', async (req, res) => {
   try {
@@ -76,16 +89,19 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
 
     const {
       folderName,
-      filePath,
+      filePath,        // string | string[] | string คั่น comma/newline
+      filePaths,       // string[]
+      targetName,      // << ตั้งชื่อไฟล์ปลายทาง (ออปชัน)
       permissions = 1,
       publicUpload,
       note,
       linkPassword,
-      expiration,   // YYYY-MM-DD
+      expiration,      // YYYY-MM-DD
       forceNew
     } = req.body || {};
 
-    if (!folderName || !filePath) {
+    const firstPath = pickFirstPath({ filePath, filePaths });
+    if (!folderName || !firstPath) {
       return res.status(400).json({ error: 'Missing folderName or filePath' });
     }
     if (expiration && isNaN(Date.parse(expiration))) {
@@ -93,15 +109,18 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
     }
 
     // 1) Upload via WebDAV
-    await fs.access(filePath).catch(() => { throw new Error(`File not found: ${filePath}`); });
+    await fs.access(firstPath).catch(() => { throw new Error(`File not found: ${firstPath}`); });
 
     const folderPath = `files/${username}/${folderName}`;
     try { await webdavClient.createDirectory(folderPath); }
     catch (err) { if (err.response?.status !== 405) throw err; } // 405 = exists
 
-    const baseName = path.basename(filePath);
-    const remotePath = `${folderPath}/${baseName}`;
-    await webdavClient.putFileContents(remotePath, await fs.readFile(filePath));
+    const baseName = (typeof targetName === 'string' && targetName.trim())
+      ? targetName.trim()
+      : path.basename(firstPath);
+
+    const davRemotePath = `${folderPath}/${baseName}`;
+    await webdavClient.putFileContents(davRemotePath, await fs.readFile(firstPath));
 
     // 2) Share path (folder root)
     const cleanPath = `/${folderName}`;
@@ -163,7 +182,11 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
 
     return res.json({
       message: existed ? 'Uploaded and reused existing public link' : 'Uploaded and created new public link',
-      uploaded: { folder: `/${folderName}`, file: baseName, remotePath: cleanPath },
+      uploaded: {
+        folder: `/${folderName}`,
+        file: baseName,
+        remotePath: `/${folderName}/${baseName}`
+      },
       share: {
         id: shareId,
         url: shareLink,
@@ -179,33 +202,52 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
   }
 });
 
+
 // (Optional) upload only
 app.post('/api/nextcloud/upload', async (req, res) => {
   try {
     if (!req.is('application/json')) {
       return res.status(400).json({ error: 'Content-Type must be application/json' });
     }
-    const { folderName, filePath } = (req.body && typeof req.body === 'object') ? req.body : {};
-    if (!folderName || !filePath) {
+    const {
+      folderName,
+      filePath,        // string | string[] | string คั่น comma/newline
+      filePaths,       // string[]
+      targetName       // << ตั้งชื่อไฟล์ปลายทาง (ออปชัน)
+    } = (req.body && typeof req.body === 'object') ? req.body : {};
+
+    const firstPath = pickFirstPath({ filePath, filePaths });
+    if (!folderName || !firstPath) {
       return res.status(400).json({ error: 'Missing folderName or filePath' });
     }
 
-    await fs.access(filePath).catch(() => { throw new Error(`File not found: ${filePath}`); });
+    await fs.access(firstPath).catch(() => { throw new Error(`File not found: ${firstPath}`); });
 
     const folderPath = `files/${username}/${folderName}`;
     try { await webdavClient.createDirectory(folderPath); }
     catch (err) { if (err.response?.status !== 405) throw err; }
 
-    const baseName = path.basename(filePath);
-    const remotePath = `${folderPath}/${baseName}`;
-    await webdavClient.putFileContents(remotePath, await fs.readFile(filePath));
+    const baseName = (typeof targetName === 'string' && targetName.trim())
+      ? targetName.trim()
+      : path.basename(firstPath);
 
-    res.json({ message: 'Uploaded', folderPath: `/${folderName}`, fileName: baseName });
+    const davRemotePath = `${folderPath}/${baseName}`;
+    await webdavClient.putFileContents(davRemotePath, await fs.readFile(firstPath));
+
+    res.json({
+      message: 'Uploaded',
+      uploaded: {
+        folder: `/${folderName}`,
+        file: baseName,
+        remotePath: `/${folderName}/${baseName}`
+      }
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);

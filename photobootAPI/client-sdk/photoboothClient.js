@@ -3,7 +3,15 @@ export class PhotoboothClient {
   /**
    * @param {object} cfg
    * @param {string} cfg.mongoBase - origin ของ mongo-api เช่น 'http://localhost:2000'
-   * @param {string} cfg.ncBase    - origin ของ nextcloud-api เช่น 'http://localhost:3000'
+   * @param {string} cfg.ncBase    - origin ของ nextcloud-api เช่น 'http://localhost:1000'
+   * @param {object} args
+   * @param {string} args.number
+   * @param {string} [args.filePath]        // ใช้ไฟล์เดียว (compat เดิม)
+   * @param {string[]} [args.filePaths]     // หลายไฟล์
+   * @param {string} args.folderName
+   * @param {string} [args.linkPassword]
+   * @param {string} [args.note]
+   * @param {string} [args.expiration]      // YYYY-MM-DD
    */
   constructor({ mongoBase, ncBase }) {
     this.mongo = mongoBase.replace(/\/$/, '');
@@ -84,31 +92,77 @@ export class PhotoboothClient {
   }
 
   /**
-   * 2) อัปโหลดรูปครั้งแรกหรือครั้งถัดไป:
-   *    - ถ้า user ยังไม่มี nextcloud_link -> upload-and-share แล้ว patch link
-   *    - ถ้ามี link แล้ว -> upload only
-   *    - ทุกครั้ง append file_address ลง DB
+   * 2) อัปโหลดรูปครั้งแรกหรือครั้งถัดไป (รองรับหลายไฟล์)
+   *    - ถ้า user ยังไม่มี nextcloud_link -> upload-and-share (ไฟล์แรก) แล้ว patch link จากนั้นที่เหลือ upload only
+   *    - ถ้ามี link แล้ว -> upload only ทุกไฟล์
+   *    - ทุกครั้ง append file_address ลง DB (แบบอาเรย์ครั้งเดียว)
    */
-  async uploadImageForUser({ number, filePath, folderName, linkPassword, note, expiration }) {
+    async uploadImageForUser({ number, filePath, filePaths, folderName, linkPassword, note, expiration }) {
+    // --- normalize input: รองรับ filePaths[] หรือ filePath ที่คั่น comma/newline ---
+    let files = [];
+    if (Array.isArray(filePaths)) {
+      files = filePaths;
+    } else if (typeof filePath === 'string' && filePath.trim()) {
+      const s = filePath.trim();
+      files = s.includes(',') || /\r?\n/.test(s)
+        ? s.split(/[,|\r?\n]+/).map(t => t.trim()).filter(Boolean)
+        : [s];
+    }
+    if (files.length === 0) throw this._err(400, 'filePath or filePaths is required');
+
+    // --- get user ---
     const found = await this.getUserByNumber(number);
-    const user = found.data;
+    const user  = found.data;
+
+    // ช่วยสกัด "พาธบนคลาวด์" จากรีสปอนส์ nextcloud-api
+    const toCloudPath = (resp) => {
+      const up     = resp?.uploaded || resp || {};
+      const remote = up.remotePath || up.remote || '';
+      const folder = up.folder || up.folderPath || '';
+      const file   = up.file || up.fileName || '';
+      if (remote) {
+        if (file && !remote.endsWith(file)) return `${remote.replace(/\/$/, '')}/${file}`;
+        return remote;
+      }
+      if (folder && file) return `${String(folder).replace(/\/$/, '')}/${file}`;
+      return file || folder || null;
+    };
+
+    const uploadedCloudPaths = [];
 
     if (!user.nextcloud_link) {
-      const up = await this.uploadAndShare({ folderName, filePath, linkPassword, note, expiration });
-      await this.setNextcloudLink(number, up.share.url);
+      // ไฟล์แรก: แชร์ลิงก์
+      const first = files[0];
+      const up1 = await this.uploadAndShare({ folderName, filePath: first, linkPassword, note, expiration });
+      if (up1?.share?.url) await this.setNextcloudLink(number, up1.share.url);
+      uploadedCloudPaths.push(toCloudPath(up1) || first);
+
+      // ไฟล์ถัดไป: upload only
+      for (const fp of files.slice(1)) {
+        const up = await this.uploadOnly({ folderName, filePath: fp });
+        uploadedCloudPaths.push(toCloudPath(up) || fp);
+      }
     } else {
-      await this.uploadOnly({ folderName, filePath });
+      // มีลิงก์อยู่แล้ว: upload only ทุกไฟล์
+      for (const fp of files) {
+        const up = await this.uploadOnly({ folderName, filePath: fp });
+        uploadedCloudPaths.push(toCloudPath(up) || fp);
+      }
     }
 
-    await this.appendFileAddress(number, filePath);
+    // บันทึกลง DB ทีเดียวแบบ array
+    await this.appendFileAddress(number, uploadedCloudPaths);
+
     // ส่งสรุปกลับให้ UI
     const latest = await this.getUserByNumber(number);
     return {
       nextcloud_link: latest.data.nextcloud_link,
       file_count: latest.file_summary?.count ?? (latest.data.file_address?.length ?? 0),
-      last_file: filePath
+      last_files: uploadedCloudPaths
     };
   }
+
+
 
   // ---------- fetch helpers ----------
   async _get(url) {
