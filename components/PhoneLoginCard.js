@@ -92,9 +92,10 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
         {step === "phone" ? (
           <div className="space-y-4">
             <div className="text-center space-y-2">
-              <CardTitle className="text-xl">Enter Your Phone Number</CardTitle>
+              <CardTitle className="text-xl">Enter Your phone number</CardTitle>
               <CardDescription>
-                We'll send you a verification code to confirm your identity
+                Enter your phone number to view your photos or access more
+                features later.
               </CardDescription>
             </div>
 
@@ -122,9 +123,9 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
         ) : (
           <div className="space-y-4">
             <div className="text-center space-y-2">
-              <CardTitle className="text-xl">Enter Verification Code</CardTitle>
+              <CardTitle className="text-xl">Enter Pin</CardTitle>
               <CardDescription>
-                Enter the 6-digit code sent to{" "}
+                Enter the 4-digit Pin{" "}
                 <span className="font-medium">
                   {formatPhoneDisplay(phoneNumber)}
                 </span>
@@ -133,7 +134,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
 
             <div className="space-y-2">
               <Label htmlFor="otp" className="text-gray-700 dark:text-gray-300">
-                Verification Code
+                Pin
               </Label>
               <Input
                 id="otp"
@@ -198,15 +199,9 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
                   Processing...
                 </>
               ) : step === "phone" ? (
-                <>
-                  <Phone className="w-4 h-4 mr-2" />
-                  Send Code
-                </>
+                <>Send Code</>
               ) : (
-                <>
-                  <Shield className="w-4 h-4 mr-2" />
-                  Verify Code
-                </>
+                <>Confirm</>
               )}
             </Button>
           </div>
