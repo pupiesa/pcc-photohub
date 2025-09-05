@@ -1,25 +1,17 @@
 {
   "name": "mongo-api",
-  "version": "1.0.0",
+  "private": true,
   "type": "module",
-  "main": "mongoAPI.js",
   "scripts": {
-    "dev": "nodemon mongoAPI.js",
-    "start": "node mongoAPI.js"
+    "dev": "node --env-file=.env mongoAPI.js"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.2",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "dayjs": "^1.11.18",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
-    "mongoose": "^8.18.0"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "devDependencies": {
-    "nodemon": "^3.1.10"
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.6.3",
+    "pcc-photohub": "file:../.."
   }
 }

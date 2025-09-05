@@ -1,26 +1,16 @@
 {
   "name": "nextcloud-api",
-  "version": "1.0.0",
+  "private": true,
   "type": "module",
-  "main": "nextcloudAPI.js",
   "scripts": {
-    "dev": "nodemon nextcloudAPI.js",
-    "start": "node nextcloudAPI.js"
+    "dev": "node --env-file=.env nextcloudAPI.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.78",
-    "axios": "^1.11.0",
+    "axios": "^1.7.7",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
-    "express": "^5.1.0",
-    "qrcode": "^1.5.4",
-    "webdav": "^5.8.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.10"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pcc-photohub": "file:../..",
+    "webdav": "^5.6.0"
   }
 }
