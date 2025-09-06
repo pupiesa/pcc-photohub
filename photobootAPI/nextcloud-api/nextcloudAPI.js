@@ -7,13 +7,27 @@ import path from 'path';
 import axios from 'axios';
 import https from 'https';
 
-const app = express();
+const app = express()
 const port = process.env.NEXTCLOUD_PORT;
 
-app.use(cors({
-  origin: ["http://localhost:3000"], // หรือโดเมนจริงของ UI
-}));
+const raw = process.env.CORS_ALLOW_ORIGINS || "";
+const allowlist = raw.split(",").map(s => s.trim()).filter(Boolean);
+const allowNoOrigin = true;
+
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return allowNoOrigin ? cb(null, true) : cb(new Error("CORS: Origin required"), false);
+    if (allowlist.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`), false);
+  },
+  methods: ["GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
+  credentials: false,
+};
+
 app.use(express.json());
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // ==== Nextcloud config ====
 const username   = process.env.NEXTCLOUD_Username;

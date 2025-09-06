@@ -6,12 +6,24 @@ import cors from 'cors';
 
 
 const app = express();
-app.use(express.json());
+const raw = process.env.CORS_ALLOW_ORIGINS || "";
+const allowlist = raw.split(",").map(s => s.trim()).filter(Boolean);
+const allowNoOrigin = true;
 
-app.use(cors({
-  origin: ["http://localhost:3000"], // หรือโดเมนจริงของ UI
-}));
-app.options('*', cors());  
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return allowNoOrigin ? cb(null, true) : cb(new Error("CORS: Origin required"), false);
+    if (allowlist.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`), false);
+  },
+  methods: ["GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
+  credentials: false,
+};
+
+app.use(express.json());
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
