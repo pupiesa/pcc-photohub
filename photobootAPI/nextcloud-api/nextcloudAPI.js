@@ -264,6 +264,10 @@ app.post('/api/nextcloud/upload', async (req, res) => {
   }
 });
 
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.head('/api/health', (_req, res) => res.status(200).end());
+
+
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);

@@ -357,6 +357,7 @@ app.post('/api/promos/:code/redeem', async (req, res) => {
 
 // Health
 app.get('/health', (req, res) => res.json({ ok: true }));
-
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.head('/api/health', (_req, res) => res.status(200).end());
 // ====== Start Server ======
 app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
