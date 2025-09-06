@@ -1,5 +1,7 @@
+"use client";
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import { client } from "@/lib/photoboothClient";            // ✅ ใช้ PhotoboothClient
 import {
   Card,
   CardContent,
@@ -13,37 +15,30 @@ const API_BASE_URL = "http://192.168.0.117:8080";
 const PhotoboothInterface = ({ user, onLogout }) => {
   const [countdown, setCountdown] = useState(null);
   const [photosTaken, setPhotosTaken] = useState(0);
-  const [livePreviewKey, setLivePreviewKey] = useState(Date.now()); // Unique key for live preview refresh
-  const [capturedImage, setCapturedImage] = useState(null); // Store captured image details
+  const [capturedImage, setCapturedImage] = useState(null);      // preview URL
+  const [capturedServerPath, setCapturedServerPath] = useState(null); // ✅ path บนเซิร์ฟเวอร์
+  const [uploading, setUploading] = useState(false);
+  const [uploadInfo, setUploadInfo] = useState(null);            // { nextcloud_link, last_files, file_count }
   const maxPhotos = 2;
+
   const videoRef = useRef(null);
-  const streamRef = useRef(null); // persist stream across UI swaps
+  const streamRef = useRef(null);
 
   useEffect(() => {
-    // Start live preview when the component mounts
-    handleReturnToLive();
-  }, []);
-
-  useEffect(() => {
+    // เริ่มกล้องตอน mount
     const startCamera = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // Some browsers require an explicit play()
-          try {
-            await videoRef.current.play();
-          } catch (_) {}
+          try { await videoRef.current.play(); } catch (_) {}
         }
       } catch (error) {
         console.error("Error accessing camera:", error);
         alert("Failed to access the camera. Please check your permissions.");
       }
     };
-
     startCamera();
 
     return () => {
@@ -54,116 +49,89 @@ const PhotoboothInterface = ({ user, onLogout }) => {
     };
   }, []);
 
-  // When returning from a captured image, ensure the stream is rebound to the video element
+  // กลับจากภาพที่ถ่าย → bind stream คืน
   useEffect(() => {
     if (!capturedImage && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
-      try {
-        videoRef.current.play();
-      } catch (_) {}
+      try { videoRef.current.play(); } catch (_) {}
     }
   }, [capturedImage]);
 
   const handleCapture = async () => {
     try {
-      const response = await axios.post(
+      const res = await axios.post(
         `${API_BASE_URL}/capture`,
         {},
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
+        { headers: { "Content-Type": "application/json" } }
       );
-      console.log("Capture response:", response.data);
-      if (response.data.url) {
+      const data = res.data || {};
+      if (data.url) {
         const ts = Date.now();
-        setCapturedImage(`${API_BASE_URL}${response.data.url}?ts=${ts}`); // cache-bust
+        setCapturedImage(`${API_BASE_URL}${data.url}?ts=${ts}`);
+        if (data.serverPath) {
+          setCapturedServerPath(data.serverPath); // ✅ ต้องได้มาจาก backend
+        } else {
+          console.warn("No serverPath in capture response. Upload to Nextcloud will not work.");
+        }
       } else {
-        console.error("No URL in capture response");
-        alert(
-          "Failed to retrieve captured image. Check the console for details."
-        );
+        alert("Failed to retrieve captured image.");
       }
     } catch (error) {
-      console.error(
-        "Error capturing image:",
-        error.response?.data || error.message
-      );
+      console.error("Error capturing image:", error.response?.data || error.message);
       alert("Failed to capture image. Check the console for details.");
     }
   };
 
-  const handleConfirmCapture = () => {
-    setCapturedImage(null); // Clear captured image details
-    setPhotosTaken((prev) => prev + 1); // Increment photos taken
-    // Ensure playback resumes
-    if (videoRef.current && streamRef.current) {
-      try {
-        videoRef.current.play();
-      } catch (_) {}
+  const handleConfirmCapture = async () => {
+    if (!capturedServerPath) {
+      alert("Server path for the captured file is missing. Please update /capture to return 'serverPath'.");
+      return;
     }
-  };
-
-  const handleReturnToLive = async () => {
+    setUploading(true);
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/return_live`,
-        {},
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      console.log("Return to live response:", response.data);
-
-      // Clear captured image and restart the camera
-      setCapturedImage(null);
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+      // อัปไฟล์นี้เข้า Nextcloud + บันทึกลง Mongo
+      const result = await client.uploadImageForUser({
+        number: user.phone,                 // ใช้เบอร์ผู้ใช้เป็น id
+        filePaths: [capturedServerPath],    // ส่งเป็น array
+        folderName: user.phone,             // โฟลเดอร์บน Nextcloud (ปรับชื่อได้)
+        // linkPassword: "1234",            // ถ้าต้องการตั้งรหัสลิงก์
+        // note: "PCC Photobooth",          // ถ้า nextcloud-api รองรับ
+        // expiration: "2025-12-31",        // วันหมดอายุลิงก์
       });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
 
-      // Force the live preview to refresh
-      setLivePreviewKey(Date.now());
-    } catch (error) {
-      console.error(
-        "Error returning to live mode:",
-        error.response?.data || error.message
-      );
-      alert("Failed to return to live mode. Check the console for details.");
+      setUploadInfo(result);                // { nextcloud_link, last_files, file_count }
+
+      // เคลียร์ preview + เพิ่มตัวนับ
+      setCapturedImage(null);
+      setCapturedServerPath(null);
+      setPhotosTaken((prev) => prev + 1);
+
+      // กลับมา live
+      if (videoRef.current && streamRef.current) {
+        try { await videoRef.current.play(); } catch (_) {}
+      }
+    } catch (e) {
+      console.error("Upload failed:", e?.message || e);
+      alert("Upload failed. Check console for details.");
+    } finally {
+      setUploading(false);
     }
   };
 
   const handleRetake = async () => {
-    // Return to live preview without starting countdown
-    try {
-      await axios.post(
-        `${API_BASE_URL}/return_live`,
-        {},
-        { headers: { "Content-Type": "application/json" } }
-      );
-    } catch (e) {
-      console.warn("/return_live failed (continuing locally):", e?.message);
-    }
+    // แค่กลับมา live, ไม่ต้องเรียก backend ก็ได้
     setCapturedImage(null);
+    setCapturedServerPath(null);
     setCountdown(null);
     if (videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
-      try {
-        await videoRef.current.play();
-      } catch (_) {}
+      try { await videoRef.current.play(); } catch (_) {}
     }
   };
 
   const startPhotoshoot = () => {
     let count = 3;
     setCountdown(count);
-
     const timer = setInterval(() => {
       count--;
       if (count > 0) {
@@ -172,7 +140,6 @@ const PhotoboothInterface = ({ user, onLogout }) => {
         setCountdown("📸");
         setTimeout(() => {
           setCountdown(null);
-          // Do NOT increment here; only increment on confirm
           handleCapture();
         }, 500);
         clearInterval(timer);
@@ -183,7 +150,8 @@ const PhotoboothInterface = ({ user, onLogout }) => {
   const resetSession = () => {
     setPhotosTaken(0);
     setCountdown(null);
-    handleReturnToLive();
+    setCapturedImage(null);
+    setCapturedServerPath(null);
   };
 
   return (
@@ -199,14 +167,14 @@ const PhotoboothInterface = ({ user, onLogout }) => {
         <CardDescription>Phone: {user.phone}</CardDescription>
 
         <div className="flex-1 flex flex-col justify-center items-center gap-6">
-          {/* Live Preview with optional captured overlay */}
+          {/* Live Preview + overlay */}
           <div className="w-full h-64 bg-black rounded-lg overflow-hidden relative">
             <video
               ref={videoRef}
               autoPlay
               playsInline
               className="w-full h-full object-cover"
-            ></video>
+            />
             {capturedImage && (
               <img
                 src={capturedImage}
@@ -221,13 +189,15 @@ const PhotoboothInterface = ({ user, onLogout }) => {
               <Button
                 onClick={handleConfirmCapture}
                 className="w-full h-12 text-xl font-bold"
+                disabled={uploading}
               >
-                Confirm Image
+                {uploading ? "Uploading..." : "Confirm Image"}
               </Button>
               <Button
                 variant="outline"
                 onClick={handleRetake}
                 className="w-full h-12"
+                disabled={uploading}
               >
                 Retake Photo
               </Button>
@@ -282,6 +252,28 @@ const PhotoboothInterface = ({ user, onLogout }) => {
         <div className="text-center text-sm text-gray-500">
           Session: ฿50 • {maxPhotos} photos included
         </div>
+
+        {uploadInfo && (
+          <div className="text-xs mt-2 space-y-1">
+            <div>
+              Nextcloud Link:{" "}
+              <a className="underline" href={uploadInfo.nextcloud_link} target="_blank">
+                {uploadInfo.nextcloud_link}
+              </a>
+            </div>
+            <div>Total files in DB: {uploadInfo.file_count}</div>
+            {uploadInfo.last_files?.length > 0 && (
+              <div>
+                <div className="font-semibold">Last uploaded:</div>
+                <ul className="list-disc pl-5">
+                  {uploadInfo.last_files.map((p, i) => (
+                    <li key={i}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

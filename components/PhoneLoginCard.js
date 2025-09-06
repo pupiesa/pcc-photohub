@@ -22,22 +22,20 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
   const handlePhoneSubmit = async () => {
     if (phoneNumber.length >= 10) {
       setIsLoading(true);
-      // Simulate API call
       setTimeout(() => {
         setStep("otp");
         setIsLoading(false);
-      }, 1000);
+      }, 400);
     }
   };
 
   const handleOtpSubmit = async () => {
     if (otp.length === 6) {
       setIsLoading(true);
-      // Simulate API call
       setTimeout(() => {
-        onLogin({ phone: phoneNumber });
+        onLogin({ phone: phoneNumber, pin: otp });
         setIsLoading(false);
-      }, 1000);
+      }, 400);
     }
   };
 
@@ -100,10 +98,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
             </div>
 
             <div className="space-y-2">
-              <Label
-                htmlFor="phone"
-                className="text-gray-700 dark:text-gray-300"
-              >
+              <Label htmlFor="phone" className="text-gray-700 dark:text-gray-300">
                 Phone Number
               </Label>
               <div className="relative">
@@ -125,7 +120,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
             <div className="text-center space-y-2">
               <CardTitle className="text-xl">Enter Pin</CardTitle>
               <CardDescription>
-                Enter the 4-digit Pin{" "}
+                Enter the 6-digit Pin{" "}
                 <span className="font-medium">
                   {formatPhoneDisplay(phoneNumber)}
                 </span>

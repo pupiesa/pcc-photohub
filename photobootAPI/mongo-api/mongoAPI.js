@@ -8,7 +8,9 @@ import cors from 'cors';
 const app = express();
 app.use(express.json());
 
-app.use(cors());
+app.use(cors({
+  origin: ["http://localhost:3000"], // หรือโดเมนจริงของ UI
+}));
 app.options('*', cors());  
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -10,7 +10,9 @@ import https from 'https';
 const app = express();
 const port = process.env.NEXTCLOUD_PORT;
 
-app.use(cors());
+app.use(cors({
+  origin: ["http://localhost:3000"], // หรือโดเมนจริงของ UI
+}));
 app.use(express.json());
 
 // ==== Nextcloud config ====
