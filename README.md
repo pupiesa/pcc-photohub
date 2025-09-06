@@ -12,12 +12,18 @@ yarn dev
 pnpm dev
 # or
 bun dev
-======= how to run API ======
-API_Server
-1. cd .\photobootAPI\
-2. npm run dev
+======= how to run server ||step by step|| ======
+1. add .env file to photobootAPI/mongoAPI ,photobootAPI/nextcloudAPI
+2. npm i
+3. npm run install:all
 
-API_Webdemo
+ ~[run all service]~
+-- npm run dev   
+
+~[view command service]~  
+-- npm run-script   
+
+~[API_Webdemo]~ 
 1.  cd .\photobootAPI\examples\web-demo\
 2.  npx http-server -p 5173 .
 =============================
