@@ -4,9 +4,7 @@
   "private": true,
   "scripts": {
     "ui": "next dev",
-    "mongo": "node --env-file=.env ./photobootAPI/mongo-api/mongoAPI.js",
-    "nextcloud": "node --env-file=.env ./photobootAPI/nextcloud-api/nextcloudAPI.js",
-    "dev": "concurrently -n mongoDB,nextcloud,ui -c green,blue,magenta \"npm:mongo\" \"npm:nextcloud\" \"npm:ui\"",
+    "dev": "node dev-supervisor.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -37,7 +35,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "15.4.4",
     "tailwindcss": "^4",
