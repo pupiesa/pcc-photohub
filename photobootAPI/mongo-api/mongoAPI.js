@@ -3,20 +3,19 @@ import express from 'express';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import cors from 'cors';
-import dayjs from 'dayjs';
 
 
 const app = express();
 app.use(express.json());
 
-app.use(cors());              // ถ้าไม่ใช้ cookie/credentials แบบ cross-site ใช้อันนี้ง่ายสุด
+app.use(cors());
 app.options('*', cors());  
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 // ====== Mongo URI  ======
 const uri = process.env.MONGODB_URI;
-const port = process.env.PORT;
+const port = process.env.MONGODB_PORT;
 if (!uri) {
   console.warn('⚠️ Missing some Check .env file.');
 }

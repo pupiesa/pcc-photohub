@@ -8,7 +8,7 @@ import axios from 'axios';
 import https from 'https';
 
 const app = express();
-const port = process.env.PORT;
+const port = process.env.NEXTCLOUD_PORT;
 
 app.use(cors());
 app.use(express.json());
