@@ -16,32 +16,45 @@ export default function BoothPage() {
   const [busy, setBusy] = useState(false);
 
   // ---------- Toast state ----------
-  // notice = { text: string, variant: "success" | "error" | "warn" }
+  // notice = { text, variant } ; variant: "success" | "error" | "warn"
   const [notice, setNotice] = useState(null);
-  const [noticeVisible, setNoticeVisible] = useState(false); // คุม fade-in/out
+  const [noticeVisible, setNoticeVisible] = useState(false);
+  const [progress, setProgress] = useState(100); // 100 -> 0
   const hideTimerRef = useRef(null);
   const removeTimerRef = useRef(null);
+  const progressTimerRef = useRef(null);
 
-  // ใช้แทน setNotice: โชว์ 5 วิ แล้วค่อยๆ จางหาย
   const showNotice = (text, variant = "success", ms = 5000) => {
-    // เคลียร์ timer เดิมก่อน
+    // clear timers
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
 
     setNotice({ text, variant });
-    setNoticeVisible(true);                 // fade-in
+    setNoticeVisible(true);
+    setProgress(100);
 
-    // เริ่ม fade-out หลังครบ ms
+    // progress countdown
+    const step = 100 / (ms / 100); // update every 100ms
+    progressTimerRef.current = setInterval(() => {
+      setProgress((p) => {
+        const next = Math.max(0, p - step);
+        return next;
+      });
+    }, 100);
+
     hideTimerRef.current = setTimeout(() => setNoticeVisible(false), ms);
-    // รอ transition (0.7s) แล้วค่อยลบออกจาก DOM
-    removeTimerRef.current = setTimeout(() => setNotice(null), ms + 700);
+    removeTimerRef.current = setTimeout(() => {
+      setNotice(null);
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    }, ms + 700); // allow fade-out transition
   };
 
-  // ล้าง timer ตอน unmount
   useEffect(() => {
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     };
   }, []);
 
@@ -49,11 +62,10 @@ export default function BoothPage() {
   const handleStartClick = () => setCurrentView("login");
   const handleBackToStart = () => setCurrentView("start");
 
-  // รับ { phone, pin } จาก PhoneLoginCard (PIN 6 หลัก)
+  // รับ { phone, pin, mode } จาก PhoneLoginCard
   const handleLogin = async ({ phone, pin }) => {
     setBusy(true);
     try {
-      // เช็คก่อนว่ามี user อยู่ไหม
       let existed = true;
       try {
         await client.getUserByNumber(phone);
@@ -62,18 +74,14 @@ export default function BoothPage() {
         else throw e;
       }
 
-      // สร้างถ้าไม่มี + เช็ค PIN (จะ throw 401 ถ้า PIN ผิด)
-      await client.ensureUserAndPin({ number: phone, pin });
+      await client.ensureUserAndPin({ number: phone, pin }); // สร้างถ้าไม่มี + เช็ค PIN
 
       setUser({ phone });
       setCurrentView("photobooth");
-      showNotice(existed ? "✅ เข้าสู่ระบบสำเร็จ" : "✅ สร้างผู้ใช้ใหม่เรียบร้อย", "success");
+      showNotice(existed ? "Signed in" : "New user created", "success");
     } catch (e) {
-      if (e?.status === 401) {
-        showNotice("❌ รหัสผิด กรุณาลองใหม่", "error");
-      } else {
-        showNotice(`⚠️ เข้าสู่ระบบไม่สำเร็จ: ${e?.message || "REQUEST_FAILED"}`, "warn");
-      }
+      if (e?.status === 401) showNotice("Wrong PIN", "error");
+      else showNotice(`Login failed: ${e?.message || "REQUEST_FAILED"}`, "warn");
     } finally {
       setBusy(false);
     }
@@ -82,10 +90,9 @@ export default function BoothPage() {
   const handleLogout = () => {
     setUser(null);
     setCurrentView("start");
-    showNotice("👋 ออกจากระบบแล้ว", "success");
+    showNotice("Signed out", "success");
   };
 
-  // ---------- UI ----------
   const renderCurrentView = () => {
     switch (currentView) {
       case "login":
@@ -106,6 +113,20 @@ export default function BoothPage() {
     }
   };
 
+  const colorBar =
+    notice?.variant === "success"
+      ? "from-emerald-400 to-lime-400"
+      : notice?.variant === "error"
+      ? "from-rose-400 to-red-500"
+      : "from-amber-400 to-yellow-400";
+
+  const cardColor =
+    notice?.variant === "success"
+      ? "bg-white/85 dark:bg-gray-900/85 border-emerald-300/60"
+      : notice?.variant === "error"
+      ? "bg-white/85 dark:bg-gray-900/85 border-rose-300/60"
+      : "bg-white/85 dark:bg-gray-900/85 border-amber-300/60";
+
   return (
     <WarpBackground className="h-screen flex flex-col" {...WARP_CONFIG}>
       <div className="text-center pt-8">
@@ -117,24 +138,26 @@ export default function BoothPage() {
         />
       </div>
 
-      {/* 🔔 Toastclass fixed/top/right */}
+      {/* Toast */}
       {notice && (
         <div
-          className={`fixed top-4 right-4 z-50 transition-opacity duration-700 ${
+          className={`fixed top-5 right-5 z-50 transition-opacity duration-700 ${
             noticeVisible ? "opacity-100" : "opacity-0"
           }`}
         >
           <div
-            className={[
-              "px-4 py-2 rounded-md shadow-lg border text-sm",
-              notice.variant === "success" && "bg-emerald-600/90 text-white border-emerald-500",
-              notice.variant === "error" && "bg-rose-600/90 text-white border-rose-500",
-              notice.variant === "warn" && "bg-amber-600/90 text-white border-amber-500",
-            ]
-              .filter(Boolean)
-              .join(" ")}
+            className={`min-w-[220px] rounded-xl shadow-xl border backdrop-blur px-4 py-3 ${cardColor}
+                        text-sm font-medium tracking-tight text-gray-900 dark:text-gray-100`}
+            style={{ fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto" }}
           >
-            {notice.text}
+            {/* progress bar */}
+            <div className={`h-1 w-full rounded-full bg-gradient-to-r ${colorBar} mb-2`}
+                 style={{ width: `${progress}%`, transition: "width 100ms linear" }} />
+            <div className="flex items-center gap-2">
+              <span>
+                {notice.text}
+              </span>
+            </div>
           </div>
         </div>
       )}
