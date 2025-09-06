@@ -13,7 +13,7 @@ pnpm dev
 # or
 bun dev
 ======= how to run server ||step by step|| ======
-1. add .env file to photobootAPI/mongoAPI ,photobootAPI/nextcloudAPI
+1. add .env file to pcc-photohub
 2. npm i
 3. npm run install:all
 
