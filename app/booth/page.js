@@ -137,33 +137,40 @@ export default function BoothPage() {
   const handleStartClick = () => setCurrentView("login");
   const handleBackToStart = () => setCurrentView("start");
 
-  const handleLogin = async ({ phone, pin }) => {
-    setBusy(true);
+const handleLogin = async ({ phone, pin }) => {
+  setBusy(true);
+  try {
+    let existed = true;
     try {
-      let existed = true;
-      try {
-        await client.getUserByNumber(phone);
-      } catch (e) {
-        if (e?.status === 404) existed = false;
-        else throw e;
-      }
-
-      await client.ensureUserAndPin({ number: phone, pin });
-      setUser({ phone });
-      setCurrentView("photobooth");
-      showNotice(existed ? "Signed in" : "New user created", "success", false, 4000);
+      await client.getUserByNumber(phone);
     } catch (e) {
-      if (!e?.status && (e?.name === "TypeError" || /Failed to fetch|NetworkError|fetch/i.test(e?.message || ""))) {
-        showNotice("API unreachable. Please check connection.", "warn", true);
-      } else if (e?.status === 401) {
-        showNotice("Wrong PIN", "error", false, 4000);
-      } else {
-        showNotice(`Login failed: ${e?.message || "REQUEST_FAILED"}`, "warn", false, 5000);
-      }
-    } finally {
-      setBusy(false);
+      if (e?.status === 404) existed = false;
+      else throw e;
     }
-  };
+
+    await client.ensureUserAndPin({ number: phone, pin });
+    // เก็บเบอร์ไว้ใช้หน้า dashboard
+    if (typeof window !== "undefined") {
+      localStorage.setItem("pcc_user_phone", phone);
+    }
+
+    setUser({ phone });
+    setCurrentView("photobooth");
+    showNotice(existed ? "Signed in" : "New user created", "success", false, 4000);
+  } catch (e) {
+    if (!e?.status && (e?.name === "TypeError" || /Failed to fetch|NetworkError|fetch/i.test(e?.message || ""))) {
+      showNotice("API unreachable. Please check connection.", "warn", true);
+    } else if (e?.status === 401) {
+      showNotice("Wrong PIN", "error", false, 4000);
+    } else if (e?.status >= 500) {
+      showNotice("Server error: DATABASE", "error", true);
+    } else {
+      showNotice(`Login failed: ${e?.message || "REQUEST_FAILED"}`, "warn", false, 5000);
+    }
+  } finally {
+    setBusy(false);
+  }
+};
 
   const handleLogout = () => {
     setUser(null);

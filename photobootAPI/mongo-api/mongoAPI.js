@@ -100,6 +100,69 @@ app.get('/api/user/by-number/:number', async (req, res) => {
   }
 });
 
+// --------- GALLERY (robust previews with fallbacks) ---------
+app.get('/api/user/:number/gallery', async (req, res) => {
+  try {
+    const number = String(req.params.number);
+    const user = await User.findOne({ number }).lean();
+    if (!user) return res.status(404).json({ ok: false, message: 'User_not_found' });
+
+    const shareUrl = user.nextcloud_link || '';
+    const files = Array.isArray(user.file_address) ? user.file_address : [];
+    if (!shareUrl || files.length === 0) {
+      return res.json({ ok: true, files: [] });
+    }
+
+    let u;
+    try { u = new URL(shareUrl); } catch { return res.json({ ok: true, files: [] }); }
+    const parts = u.pathname.split('/').filter(Boolean);
+    const token = parts[parts.length - 1] || '';
+    if (!token) return res.json({ ok: true, files: [] });
+
+    const origin = `${u.protocol}//${u.host}`;
+
+    const cleanRelPath = (p) => {
+      const s = String(p).trim().replace(/^https?:\/\/[^/]+/i, '');
+      const davPrefix = /^\/?remote\.php\/dav\/files\/[^/]+\//i;
+      if (davPrefix.test(s)) return s.replace(davPrefix, '').replace(/^\/+/, '');
+      return s.replace(/^\/+/, '');
+    };
+
+    const encSegs = (rel) => rel.split('/').filter(Boolean).map(encodeURIComponent).join('%2F');
+    const splitNameParent = (rel) => {
+      const segs = rel.split('/').filter(Boolean);
+      const name = segs.pop() || '';
+      const parent = segs.join('/');
+      return { name, parent };
+    };
+
+    const items = files.map((p) => {
+      const rel = cleanRelPath(p);
+      const { name, parent } = splitNameParent(rel);
+
+      const fileParam = `%2F${encSegs(rel)}`;                       // "/Folder/file.jpg"
+      const pathParam = parent ? `%2F${encSegs(parent)}` : '%2F';    // "/Folder" หรือ "/"
+
+      const previews = [
+        // core/preview (แนะนำ)
+        `${origin}/index.php/core/preview.png?file=${fileParam}&x=512&y=512&a=1&mode=cover&t=${encodeURIComponent(token)}`,
+        // ajax/publicpreview (รุ่นเก่า)
+        `${origin}/index.php/apps/files_sharing/ajax/publicpreview.php?x=512&y=512&a=1&t=${encodeURIComponent(token)}&file=${fileParam}`,
+        // เส้นทาง preview ของ public share บางรุ่น
+        `${origin}/s/${encodeURIComponent(token)}/preview?file=${fileParam}&x=512&y=512&a=1`,
+      ];
+
+      const downloadUrl = `${origin}/s/${encodeURIComponent(token)}/download?path=${pathParam}&files=${encodeURIComponent(name)}`;
+
+      return { name, path: rel, previews, downloadUrl };
+    });
+
+    res.json({ ok: true, files: items });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: 'server error' });
+  }
+});
 // 2) สร้างผู้ใช้ใหม่ (PIN จะถูก hash อัตโนมัติ)
 app.post('/api/user', async (req, res) => {
   try {

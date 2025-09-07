@@ -70,6 +70,12 @@ export class PhotoboothClient {
     return this._post(`${this.nc}/api/nextcloud/upload`, { folderName, filePath });
   }
 
+// --------- GALLERY ----------
+  getUserGallery(number) {
+    return this._get(`${this.mongo}/api/user/${encodeURIComponent(number)}/gallery`);
+  }
+
+
   // ---------- ORCHESTRATIONS (Flow ที่ UI ขอ) ----------
   /**
    * 1) รับเบอร์/พินจาก UI -> หา user; ไม่มีให้สร้าง -> เช็คพิน

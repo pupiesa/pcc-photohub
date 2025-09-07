@@ -6,6 +6,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import axios from 'axios';
 import https from 'https';
+import mime from 'mime-types';
 
 const app = express()
 const port = process.env.NEXTCLOUD_PORT;
@@ -261,6 +262,75 @@ app.post('/api/nextcloud/upload', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Normalize path ให้เป็น relative ต่อ WebDAV root ของ user เสมอ ---
+function normRelPath(input) {
+  if (!input) return "";
+  let s = decodeURIComponent(String(input)).replace(/^https?:\/\/[^/]+/i, "");
+  const escUser = username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  s = s
+    .replace(new RegExp(`^/?remote\\.php/dav/files/${escUser}/`, "i"), "")
+    .replace(new RegExp(`^/?files/${escUser}/`, "i"), "")
+    .replace(/^\/+/, "");
+  return s;
+}
+
+// ---------- Robust image preview via WebDAV client ----------
+app.get("/api/nextcloud/preview", async (req, res) => {
+  try {
+    if (!webdavUrl || !username || !ncPassword) {
+      return res.status(500).json({ ok: false, message: "NEXTCLOUD_NOT_CONFIGURED" });
+    }
+    const rel = normRelPath(req.query.path || "");
+    if (!rel) return res.status(400).json({ ok: false, message: "path required" });
+
+    let data;
+    try {
+      data = await webdavClient.getFileContents(rel, { format: "binary" });
+    } catch {
+      const enc = rel.split("/").map(encodeURIComponent).join("/");
+      data = await webdavClient.getFileContents(enc, { format: "binary" });
+    }
+
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const contentType = mime.lookup(rel) || "application/octet-stream";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    res.end(buf);
+  } catch (e) {
+    const status = e?.response?.status || 404;
+    console.error("preview failed:", {
+      status,
+      msg: e?.message,
+      path: req?.query?.path,
+    });
+    res.status(status).json({ ok: false, message: "PREVIEW_FAILED", status });
+  }
+});
+
+// ---------- Debug: list directory ----------
+app.get("/api/nextcloud/list", async (req, res) => {
+  try {
+    const rel = normRelPath(req.query.path || "");
+    const dir = rel || "";
+    const items = await webdavClient.getDirectoryContents(dir);
+    res.json({
+      ok: true,
+      path: `/${dir}`,
+      items: items.map((it) => ({
+        type: it.type,          
+        filename: it.filename,  
+        basename: it.basename,
+        size: it.size,
+        lastmod: it.lastmod,
+      })),
+    });
+  } catch (e) {
+    console.error("list failed:", e?.message);
+    res.status(500).json({ ok: false, message: "LIST_FAILED" });
   }
 });
 
