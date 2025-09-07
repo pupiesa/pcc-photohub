@@ -36,6 +36,10 @@ const ncPassword = process.env.NEXTCLOUD_Password;
 const webdavUrl  = process.env.NEXTCLOUD_webdavUrl;
 const ocsApiUrl  = process.env.NEXTCLOUD_ocsApiUrl;
 
+const previewBase = process.env.NEXTCLOUD_PREVIEW
+  ? process.env.NEXTCLOUD_PREVIEW.replace(/\/$/, "")
+  : null;
+
 if (!username || !ncPassword || !webdavUrl || !ocsApiUrl) {
   console.warn('⚠️ Missing some NEXTCLOUD_* envs. Check .env file.');
 }
@@ -286,27 +290,39 @@ app.get("/api/nextcloud/preview", async (req, res) => {
     const rel = normRelPath(req.query.path || "");
     if (!rel) return res.status(400).json({ ok: false, message: "path required" });
 
-    let data;
+    const tryWebdav = async () => {
+      try {
+        const data = await webdavClient.getFileContents(rel, { format: "binary" });
+        return Buffer.isBuffer(data) ? data : Buffer.from(data);
+      } catch {
+        const enc = rel.split("/").map(encodeURIComponent).join("/");
+        const data2 = await webdavClient.getFileContents(enc, { format: "binary" });
+        return Buffer.isBuffer(data2) ? data2 : Buffer.from(data2);
+      }
+    };
+
+    let buf = null;
     try {
-      data = await webdavClient.getFileContents(rel, { format: "binary" });
-    } catch {
+      buf = await tryWebdav();
+    } catch (errWebdav) {
+      if (!previewBase) throw errWebdav;
       const enc = rel.split("/").map(encodeURIComponent).join("/");
-      data = await webdavClient.getFileContents(enc, { format: "binary" });
+      const url = `${previewBase}/${enc}`;
+      const r = await axios.get(url, {
+        responseType: "arraybuffer",
+        auth: { username, password: ncPassword },
+        httpsAgent,
+      });
+      buf = Buffer.from(r.data);
     }
 
-    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
     const contentType = mime.lookup(rel) || "application/octet-stream";
-
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.end(buf);
   } catch (e) {
     const status = e?.response?.status || 404;
-    console.error("preview failed:", {
-      status,
-      msg: e?.message,
-      path: req?.query?.path,
-    });
+    console.error("preview failed:", { status, msg: e?.message, path: req?.query?.path });
     res.status(status).json({ ok: false, message: "PREVIEW_FAILED", status });
   }
 });
