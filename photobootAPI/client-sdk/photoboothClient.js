@@ -2,8 +2,8 @@
 export class PhotoboothClient {
   /**
    * @param {object} cfg
-   * @param {string} cfg.mongoBase - origin ของ mongo-api เช่น 'http://localhost:2000'
-   * @param {string} cfg.ncBase    - origin ของ nextcloud-api เช่น 'http://localhost:1000'
+   * @param {string} cfg.mongoBase - origin ของ mongo-api 
+   * @param {string} cfg.ncBase    - origin ของ nextcloud-api
    * @param {object} args
    * @param {string} args.number
    * @param {string} [args.filePath]        // ใช้ไฟล์เดียว (compat เดิม)
@@ -38,7 +38,7 @@ export class PhotoboothClient {
     return this._patch(`${this.mongo}/api/user/${encodeURIComponent(number)}/pin`, { pin });
   }
 
-  // ---------- PROMO (มีอยู่ใน API แล้ว) ----------
+  // ---------- PROMO ----------
   listPromos({ active } = {}) {
     const q = active === true ? '?active=true' : '';
     return this._get(`${this.mongo}/api/promos${q}`);
@@ -70,13 +70,29 @@ export class PhotoboothClient {
     return this._post(`${this.nc}/api/nextcloud/upload`, { folderName, filePath });
   }
 
-// --------- GALLERY ----------
+  // --------- GALLERY ----------
   getUserGallery(number) {
     return this._get(`${this.mongo}/api/user/${encodeURIComponent(number)}/gallery`);
   }
 
+  // --------- SHARE PASSWORD (NEW) ----------
+  /**
+   * เปลี่ยน/ลบรหัสผ่านของ public share link (ลิงก์แชร์) ของโฟลเดอร์บน Nextcloud
+   * - newPassword = "" (สตริงว่าง) -> ลบรหัส
+   * - expiration: "YYYY-MM-DD" | "" (ลบวันหมดอายุ) | undefined (ไม่แตะต้อง)
+   */
+  changeSharePassword({ folderName, newPassword, expiration, note, publicUpload, permissions }) {
+    return this._post(`${this.nc}/api/nextcloud/change-share-password`, {
+      folderName, newPassword, expiration, note, publicUpload, permissions,
+    });
+  }
 
-  // ---------- ORCHESTRATIONS (Flow ที่ UI ขอ) ----------
+  // สะดวกสำหรับกรณีชื่อโฟลเดอร์ = เบอร์ผู้ใช้
+  changeSharePasswordForUser({ number, newPassword, expiration, note, publicUpload, permissions }) {
+    return this.changeSharePassword({ folderName: number, newPassword, expiration, note, publicUpload, permissions });
+  }
+
+  // ---------- ORCHESTRATIONS ----------
   /**
    * 1) รับเบอร์/พินจาก UI -> หา user; ไม่มีให้สร้าง -> เช็คพิน
    */
@@ -103,7 +119,7 @@ export class PhotoboothClient {
    *    - ถ้ามี link แล้ว -> upload only ทุกไฟล์
    *    - ทุกครั้ง append file_address ลง DB (แบบอาเรย์ครั้งเดียว)
    */
-    async uploadImageForUser({ number, filePath, filePaths, folderName, linkPassword, note, expiration }) {
+  async uploadImageForUser({ number, filePath, filePaths, folderName, linkPassword, note, expiration }) {
     // --- normalize input: รองรับ filePaths[] หรือ filePath ที่คั่น comma/newline ---
     let files = [];
     if (Array.isArray(filePaths)) {
@@ -168,7 +184,44 @@ export class PhotoboothClient {
     };
   }
 
+  /**
+   * 3) Orchestration: เปลี่ยน PIN แล้ว sync รหัสลิงก์ Cloud ให้เป็นค่าเดียวกัน
+   *    - ตั้งค่า throwOnCloudFail=true ถ้าต้องการให้ล้มทันทีเมื่ออัปเดต Cloud ไม่สำเร็จ
+   *    - ค่า default จะสำเร็จแบบมี warning (ไม่ throw)
+   * @returns {Promise<{ok:true, cloud:any|null, warning?:{message:string,error:string}}>}
+   */
+  async changePinAndSyncCloud({ number, newPin, expiration, note, publicUpload, permissions, throwOnCloudFail = false }) {
+    // 1) เปลี่ยน PIN ใน DB
+    await this.changePin(number, newPin);
 
+    // 2) เปลี่ยนรหัสลิงก์แชร์ Nextcloud ให้ตรงกับ PIN ใหม่
+    try {
+      const cloudRes = await this.changeSharePasswordForUser({
+        number,
+        newPassword: newPin,
+        expiration,
+        note,
+        publicUpload,
+        permissions,
+      });
+      return { ok: true, cloud: cloudRes };
+    } catch (e) {
+      if (throwOnCloudFail) {
+        const err = new Error(`PIN updated, but cloud password update failed: ${e?.message || 'CLOUD_SYNC_FAILED'}`);
+        err.status = e?.status || e?.payload?.status || 500;
+        err.cause = e;
+        throw err;
+      }
+      return {
+        ok: true,
+        cloud: null,
+        warning: {
+          message: 'PIN updated, but failed to update cloud link password.',
+          error: e?.message || String(e),
+        },
+      };
+    }
+  }
 
   // ---------- fetch helpers ----------
   async _get(url) {

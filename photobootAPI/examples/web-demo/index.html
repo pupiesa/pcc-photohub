@@ -3,358 +3,494 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Photobooth Demo — Simple Web</title>
+  <title>PhotoboothAPI — Web Demo</title>
   <style>
     :root { --bg:#0b1020; --card:#121a33; --ink:#e8eefc; --muted:#a9b4d6; --acc:#6aa7ff; --ok:#3ad29f; --err:#ff6b6b; }
     html,body{height:100%}
     body{margin:0; background:linear-gradient(180deg,#0b1020,#0e1430 40%,#0b1020); color:var(--ink); font:15px/1.4 system-ui,Segoe UI,Roboto,Arial;}
-    .wrap{max-width:1000px; margin:24px auto; padding:0 16px}
+    .wrap{max-width:1100px; margin:24px auto; padding:0 16px}
     h1{font-size:22px; letter-spacing:.3px;}
     .grid{display:grid; grid-template-columns:1fr; gap:14px}
-    @media(min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
+    @media(min-width:980px){ .grid{grid-template-columns:1fr 1fr} }
     .card{background:var(--card); border:1px solid #1b2550; border-radius:16px; box-shadow:0 8px 24px rgba(0,0,0,.35); padding:16px}
     .title{display:flex; align-items:center; gap:8px; font-weight:700; margin-bottom:10px}
-    .row{display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; margin:6px 0}
+    .row{display:grid; grid-template-columns:170px 1fr; gap:10px; align-items:center; margin:6px 0}
     label{color:var(--muted)}
-    input,select{background:#0e1530; color:var(--ink); border:1px solid #253066; border-radius:10px; outline:none; padding:10px 12px}
-    input:focus{border-color:#3b57c7; box-shadow:0 0 0 3px rgba(106,167,255,.2)}
+    input,select,textarea{background:#0e1530; color:var(--ink); border:1px solid #253066; border-radius:10px; outline:none; padding:10px 12px}
+    textarea{min-height:84px}
+    input:focus,textarea:focus{border-color:#3b57c7; box-shadow:0 0 0 3px rgba(106,167,255,.2)}
     .btns{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
     button{background:#17306b; color:#eef3ff; border:1px solid #2b4aa1; border-radius:12px; padding:10px 14px; cursor:pointer}
     button:hover{filter:brightness(1.1)}
     button.ok{background:#0f5d4d; border-color:#12836b}
     button.warn{background:#6b2f17; border-color:#b05a2d}
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
-    pre{background:#091028; color:#dce7ff; border:1px solid #1b2550; border-radius:12px; padding:14px; max-height:320px; overflow:auto}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+    pre{background:#091028; color:#dce7ff; border:1px solid #1b2550; border-radius:12px; padding:14px; max-height:360px; overflow:auto}
     small{color:var(--muted)}
     .footer{opacity:.8; margin-top:14px}
+    .thumbs{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px}
+    .thumb{border:1px solid #283166; border-radius:10px; overflow:hidden; background:#0e1530}
+    .thumb img{width:100%; height:120px; object-fit:cover; display:block}
+    .badge{display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; background:#1c2c64; border:1px solid #2d4499; color:#d8e4ff}
+    .muted{color:#9fb0db}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>📸 PhotoboothAPI Simple Web</h1>
-    <div class="card">
-      <div class="title">🔧 ตั้งค่า API</div>
-      <div class="row"><label>Mongo API URL</label><input id="mongoBase" value="http://localhost:2000"/></div>
-      <div class="row"><label>Nextcloud API URL</label><input id="ncBase" value="http://localhost:1000"/></div>
-      <div class="btns"><button id="saveCfg">Save</button><small>บันทึกค่าไว้ใน browser</small></div>
-    </div>
+<div class="wrap">
+  <h1>📸 PhotoboothAPI — Web Demo</h1>
 
-    <div class="grid" style="margin-top:14px">
-      <div class="card">
-        <div class="title">1) Ensure User & Check PIN</div>
-        <div class="row"><label>เบอร์ (number)</label><input id="u_number" placeholder="0912345678"/></div>
-        <div class="row"><label>PIN</label><input id="u_pin" placeholder="1234"/></div>
-        <div class="btns">
-          <button id="btnEnsureUserOnly">Ensure User Only (create if missing)</button>
-          <button id="btnEnsure" class="ok">✅ Ensure & Check PIN</button>
-          <button id="btnGetUser">แค่ Get User</button>
-          <button id="btnCreateUser">Create User</button>
-          <button id="btnCheckPin">Check PIN</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="title">2) Upload รูป</div>
-        <div class="row"><label>เบอร์ (ใช้เป็นโฟลเดอร์)</label><input id="up_number" placeholder="0912345678"/></div>
-        <div class="row"><label>Folder Name</label><input id="up_folder" placeholder="เช่น เบอร์โทร"/></div>
-        <div class="row"><label>File Path (บนเครื่องเซิร์ฟเวอร์)</label><input id="up_file" placeholder="C:\\Users\\me\\Pictures\\test.jpg"/></div>
-        <div class="row"><label>Note</label><input id="up_note" value="ProjectPhoto_PCC"/></div>
-        <div class="row"><label>Link Password</label><input id="up_pass" placeholder="เว้นว่างได้"/></div>
-        <div class="row"><label>Expire (YYYY-MM-DD)</label><input id="up_exp" placeholder="2026-12-31"/></div>
-        <div class="btns">
-          <button id="btnFlowUpload" class="ok">🚀 Upload Flow (auto choose)</button>
-          <button id="btnUploadShare">Upload+Share</button>
-          <button id="btnUploadOnly">Upload Only</button>
-        </div>
-        <small>หมายเหตุ: endpoint ปัจจุบันอ่าน <b>filePath จากฝั่งเซิร์ฟเวอร์</b>. ให้ใส่พาธของไฟล์ที่เครื่องรัน nextcloud-api</small>
-      </div>
-
-      <div class="card">
-        <div class="title">3) Promo</div>
-        <div class="row"><label>Code</label><input id="pm_code" value="WELCOME10"/></div>
-        <div class="row"><label>Type</label>
-          <select id="pm_type">
-            <option value="percent">percent</option>
-            <option value="fixed">fixed</option>
-          </select>
-        </div>
-        <div class="row"><label>Value</label><input id="pm_value" type="number" value="10"/></div>
-        <div class="row"><label>Order Amount</label><input id="pm_amt" type="number" value="500"/></div>
-        <div class="btns">
-          <button id="btnPromoCreate">Create</button>
-          <button id="btnPromoValidate" class="ok">Validate</button>
-          <button id="btnPromoRedeem">Redeem</button>
-          <button id="btnPromoList">List active</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="title">📜 Log</div>
-        <pre id="log" class="mono">Ready.</pre>
-        <div class="btns"><button id="clearLog" class="warn">Clear Log</button></div>
-        <div class="footer"><small>Tip: ถ้า CORS error ให้เปิด CORS ใน mongo-api (ดูคำแนะนำใต้หน้าต่างแชท)</small></div>
-      </div>
+  <!-- CONFIG -->
+  <div class="card">
+    <div class="title">🔧 ตั้งค่า API</div>
+    <div class="row"><label>Mongo API URL</label><input id="cfg_mongo" value="http://localhost:2000"/></div>
+    <div class="row"><label>Nextcloud API URL</label><input id="cfg_nc" value="http://localhost:1000"/></div>
+    <div class="btns">
+      <button id="btnSaveCfg">Save</button>
+      <button id="btnPing" class="ok">Ping APIs</button>
+      <small>บันทึกค่าไว้ใน browser</small>
     </div>
   </div>
 
+  <div class="grid" style="margin-top:14px">
+    <!-- USER -->
+    <div class="card">
+      <div class="title">1) User</div>
+      <div class="row"><label>Number (phone)</label><input id="u_number" placeholder="0912345678"/></div>
+      <div class="row"><label>PIN (optional)</label><input id="u_pin" placeholder="123456"/></div>
+      <div class="btns">
+        <button id="btnEnsureUser" class="ok">Ensure User (create if missing)</button>
+        <button id="btnGetUser">Get User</button>
+        <button id="btnCreateUser">Create User</button>
+        <button id="btnChangePin">Change PIN</button>
+      </div>
+      <div class="btns" style="margin-top:6px">
+        <button id="btnSyncPinCloud">Change PIN & Sync Cloud Password</button>
+        <small class="muted">จะอัปเดตรหัสลิงก์แชร์ให้เท่ากับ PIN ด้วย</small>
+      </div>
+    </div>
+
+    <!-- UPLOAD -->
+    <div class="card">
+      <div class="title">2) Upload รูป</div>
+
+      <!-- A) Upload หลายไฟล์ ด้วย file picker (ต้องมี endpoint /upload-bytes ที่ nextcloud-api) -->
+      <div class="row"><label>Folder Name</label><input id="up_folder" placeholder="เช่น ใช้เบอร์โทรเป็นโฟลเดอร์"/></div>
+      <div class="row"><label>เลือกไฟล์ (หลายไฟล์)</label><input id="up_files" type="file" multiple /></div>
+      <div class="row"><label>Note</label><input id="up_note" value="ProjectPhoto_PCC"/></div>
+      <div class="row"><label>Link Password</label><input id="up_pass" placeholder="เว้นว่างได้"/></div>
+      <div class="row"><label>Expire (YYYY-MM-DD)</label><input id="up_exp" placeholder="2026-12-31"/></div>
+      <div class="btns">
+        <button id="btnUploadBytesOnly">Upload (bytes) Only</button>
+      </div>
+
+      <hr style="opacity:.2;margin:14px 0">
+
+      <!-- B) โหมดเดิม: ส่งพาธไฟล์บนเครื่องเซิร์ฟเวอร์ -->
+      <div class="row"><label>Server File Paths</label>
+        <textarea id="up_server_paths" placeholder="C:\images\a.jpg
+D:\cam\shot1.png
+/home/user/pic.jpg"></textarea>
+      </div>
+      <div class="btns">
+        <button id="btnFlowUpload" class="ok">Flow Upload (server paths)</button>
+        <button id="btnUploadShare">Upload+Share (first path)</button>
+        <button id="btnUploadOnly">Upload Only (all paths)</button>
+        <small>อ่านไฟล์จากฝั่ง <b>เซิร์ฟเวอร์</b> ที่รัน nextcloud-api</small>
+      </div>
+    </div>
+
+    <!-- GALLERY -->
+    <div class="card">
+      <div class="title">3) Gallery</div>
+      <div class="row"><label>Number (phone)</label><input id="gal_number" placeholder="0912345678"/></div>
+      <div class="btns">
+        <button id="btnLoadGallery" class="ok">Load Gallery</button>
+      </div>
+      <div id="galleryInfo" class="muted" style="margin:8px 0 6px"></div>
+      <div id="thumbs" class="thumbs"></div>
+      <small>Preview ใช้ <code>/api/nextcloud/preview?path=…</code> จาก nextcloud-api</small>
+    </div>
+
+    <!-- PROMO -->
+    <div class="card">
+      <div class="title">4) Promo</div>
+      <div class="row"><label>Code</label><input id="pm_code" value="WELCOME10"/></div>
+      <div class="row"><label>Type</label>
+        <select id="pm_type">
+          <option value="percent">percent</option>
+          <option value="fixed">fixed</option>
+        </select>
+      </div>
+      <div class="row"><label>Value</label><input id="pm_value" type="number" value="10"/></div>
+      <div class="row"><label>Order Amount</label><input id="pm_amt" type="number" value="500"/></div>
+      <div class="btns">
+        <button id="btnPromoCreate">Create</button>
+        <button id="btnPromoValidate" class="ok">Validate</button>
+        <button id="btnPromoRedeem">Redeem</button>
+        <button id="btnPromoList">List active</button>
+      </div>
+    </div>
+
+    <!-- CLOUD LINK PASSWORD -->
+    <div class="card">
+      <div class="title">5) Cloud Link Password</div>
+      <div class="row"><label>Folder Name</label><input id="cp_folder" placeholder="เช่น เบอร์โทร"/></div>
+      <div class="row"><label>New Password</label><input id="cp_newpass" placeholder="เว้นว่าง = ลบรหัส"/></div>
+      <div class="row"><label>Expire (YYYY-MM-DD)</label><input id="cp_exp" placeholder="เว้นว่าง = ไม่แตะ / ใส่ค่าว่าง = ลบวันหมดอายุ"/></div>
+      <div class="row"><label>Note</label><input id="cp_note" placeholder=""/></div>
+      <div class="row"><label>Public Upload?</label>
+        <select id="cp_pub">
+          <option value="">(ไม่แตะ)</option>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </div>
+      <div class="row"><label>Permissions</label>
+        <input id="cp_perm" placeholder="เว้นว่าง = ไม่แตะ (ค่า OCS)"/>
+      </div>
+      <div class="btns">
+        <button id="btnChangeSharePass" class="ok">Apply</button>
+        <small>อัปเดตรหัส/หมดอายุ/โน้ต/อัปโหลดสาธารณะ ของลิงก์แชร์</small>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div class="card">
+      <div class="title">📜 Log</div>
+      <pre id="log" class="mono">Ready.</pre>
+      <div class="btns"><button id="btnClearLog" class="warn">Clear Log</button></div>
+      <div class="footer"><small>Tip: ถ้า CORS error ให้เปิด CORS ใน mongo-api / nextcloud-api (ค่า allowNoOrigin ของคุณควรเป็น true สำหรับไฟล์นี้)</small></div>
+    </div>
+  </div>
+</div>
+
 <script type="module">
-  // ===== PhotoboothClient (ย่อ/ฝังในไฟล์เดียว) =====
+  // ======= SDK (inline) — no auth flow =======
   class PhotoboothClient {
-    constructor({ mongoBase, ncBase }) {
-      this.mongo = mongoBase.replace(/\/$/, '');
-      this.nc = ncBase.replace(/\/$/, '');
-    }
+    constructor({ mongoBase, ncBase }) { this.mongo = mongoBase.replace(/\/$/,''); this.nc = ncBase.replace(/\/$/,''); }
+
     // USER
-    getUserByNumber(n){return this._get(`${this.mongo}/api/user/by-number/${encodeURIComponent(n)}`)}
-    createUser(b){return this._post(`${this.mongo}/api/user`, b)}
-    checkPin(b){return this._post(`${this.mongo}/api/user/check-pin`, b)}
-    setNextcloudLink(n,link){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/nextcloud-link`,{nextcloud_link:link})}
-    appendFileAddress(n,f){return this._post(`${this.mongo}/api/user/${encodeURIComponent(n)}/file-address`,{file_address:f})}
-    changePin(n,p){return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/pin`,{pin:p})}
+    getUserByNumber(n){ return this._get(`${this.mongo}/api/user/by-number/${encodeURIComponent(n)}`) }
+    createUser(b){ return this._post(`${this.mongo}/api/user`, b) }
+    setNextcloudLink(n,link){ return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/nextcloud-link`,{nextcloud_link:link}) }
+    appendFileAddress(n,f){ return this._post(`${this.mongo}/api/user/${encodeURIComponent(n)}/file-address`,{file_address:f}) }
+    changePin(n,p){ return this._patch(`${this.mongo}/api/user/${encodeURIComponent(n)}/pin`,{pin:p}) }
+    async ensureUser({number,pin}) {
+      try { return await this.getUserByNumber(number); }
+      catch(e){ if(e.status!==404) throw e; await this.createUser({number,pin}); return await this.getUserByNumber(number); }
+    }
+
     // PROMO
-    listPromos({active}={}){const q=active?"?active=true":"";return this._get(`${this.mongo}/api/promos${q}`)}
-    createPromo(b){return this._post(`${this.mongo}/api/promos`,b)}
-    getPromo(c){return this._get(`${this.mongo}/api/promos/${encodeURIComponent(c)}`)}
-    updatePromo(c,b){return this._patch(`${this.mongo}/api/promos/${encodeURIComponent(c)}`,b)}
-    deactivatePromo(c){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/deactivate`)}
-    validatePromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/validate`,b)}
-    redeemPromo(c,b){return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/redeem`,b)}
+    listPromos({active}={}){ const q=active?"?active=true":""; return this._get(`${this.mongo}/api/promos${q}`) }
+    createPromo(b){ return this._post(`${this.mongo}/api/promos`,b) }
+    getPromo(c){ return this._get(`${this.mongo}/api/promos/${encodeURIComponent(c)}`) }
+    updatePromo(c,b){ return this._patch(`${this.mongo}/api/promos/${encodeURIComponent(c)}`,b) }
+    deactivatePromo(c){ return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/deactivate`) }
+    validatePromo(c,b){ return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/validate`,b) }
+    redeemPromo(c,b){ return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/redeem`,b) }
+
     // NEXTCLOUD
-    uploadAndShare(b){return this._post(`${this.nc}/api/nextcloud/upload-and-share`,b)}
-    uploadOnly(b){return this._post(`${this.nc}/api/nextcloud/upload`,b)}
-    // ORCHESTRATIONS
-    async ensureUserAndPin({number,pin}){
-      let user=null; try{const r=await this.getUserByNumber(number); user=r.data;}catch(e){if(e.status!==404) throw e}
-      if(!user){await this.createUser({number,pin}); user=(await this.getUserByNumber(number)).data}
-      const {match}=await this.checkPin({number,pin}); if(!match){const er=new Error('PIN_NOT_MATCH'); er.status=401; throw er}
-      return user;
+    uploadAndShare(b){ return this._post(`${this.nc}/api/nextcloud/upload-and-share`, b) }
+    uploadOnly(b){ return this._post(`${this.nc}/api/nextcloud/upload`, b) }
+    // (ใหม่) อัปโหลดไฟล์เป็นไบต์ (ต้องมี endpoint ใน nextcloud-api)
+    async uploadBytes({ folderName, file, targetName, share=false, note, linkPassword, expiration, forceNew }) {
+      const ep = share ? '/api/nextcloud/upload-bytes-share' : '/api/nextcloud/upload-bytes';
+      const url = `${this.nc}${ep}`;
+      const fd = new FormData();
+      fd.append('folderName', folderName);
+      fd.append('file', file, targetName || file.name);
+      if (targetName) fd.append('targetName', targetName);
+      if (share) {
+        if (note) fd.append('note', note);
+        if (linkPassword) fd.append('linkPassword', linkPassword);
+        if (expiration) fd.append('expiration', expiration);
+        if (forceNew) fd.append('forceNew', 'true');
+      }
+      const r = await fetch(url, { method:'POST', body: fd });
+      return this._handle(r);
     }
-    async ensureUserOnly({number,pin}){
-      try { await this.getUserByNumber(number); return {created:false}; }
-      catch(e){
-        if(e.status!==404) throw e;
-        await this.createUser({number,pin});
-        return {created:true};
+
+    // GALLERY
+    getUserGallery(number){ return this._get(`${this.mongo}/api/user/${encodeURIComponent(number)}/gallery`) }
+
+    // CHANGE SHARE PASSWORD
+    changeSharePassword({ folderName, newPassword, expiration, note, publicUpload, permissions }) {
+      return this._post(`${this.nc}/api/nextcloud/change-share-password`, { folderName, newPassword, expiration, note, publicUpload, permissions });
+    }
+    changeSharePasswordForUser({ number, newPassword, expiration, note, publicUpload, permissions }) {
+      return this.changeSharePassword({ folderName:number, newPassword, expiration, note, publicUpload, permissions });
+    }
+
+    // ORCHESTRATION: เปลี่ยน PIN แล้ว sync cloud password
+    async changePinAndSyncCloud({ number, newPin, expiration, note, publicUpload, permissions, throwOnCloudFail=false }) {
+      await this.changePin(number, newPin);
+      try{
+        const cloudRes = await this.changeSharePasswordForUser({ number, newPassword:newPin, expiration, note, publicUpload, permissions });
+        return { ok:true, cloud: cloudRes };
+      }catch(e){
+        if (throwOnCloudFail) { const err=new Error(`PIN updated, but cloud password update failed: ${e?.message||'CLOUD_SYNC_FAILED'}`); err.status=e?.status||e?.payload?.status||500; err.cause=e; throw err; }
+        return { ok:true, cloud:null, warning:{ message:'PIN updated, but failed to update cloud link password.', error:e?.message||String(e) } };
       }
     }
 
-    // >>> อัปโหลดหลายไฟล์ + บันทึก file_address เป็นพาธบน Nextcloud
-    async uploadImagesForUser({ number, filePaths, folderName, note, linkPassword, expiration }) {
-      if (!Array.isArray(filePaths) || filePaths.length===0) {
-        throw new Error('filePaths is required (array)');
-      }
-      // user
-      const found=await this.getUserByNumber(number);
-      const user=found.data;
-
-      // helper: ดึงพาธบน Nextcloud จาก response
-      const toCloudPath = (resp) => {
-        const up     = resp?.uploaded || resp || {};
-        const remote = up.remotePath || up.remote || '';
-        const folder = up.folder || up.folderPath || '';
-        const file   = up.file || up.fileName || '';
-        if (remote) {
-          if (file && !remote.endsWith(file)) return `${remote.replace(/\/$/, '')}/${file}`;
-          return remote;
-        }
-        if (folder && file) return `${String(folder).replace(/\/$/, '')}/${file}`;
-        return file || folder || null;
-      };
-
-      const cloudPaths = [];
-      if (!user.nextcloud_link) {
-        // 1) ไฟล์แรก: upload+share เพื่อสร้าง/รีใช้ลิงก์
-        const first = filePaths[0];
-        const up1 = await this.uploadAndShare({ folderName, filePath: first, note, linkPassword, expiration });
-        if (up1?.share?.url) await this.setNextcloudLink(number, up1.share.url);
-        cloudPaths.push(toCloudPath(up1) || first);
-        // 2) ที่เหลือ: upload only
-        for (const fp of filePaths.slice(1)) {
-          const up = await this.uploadOnly({ folderName, filePath: fp });
-          cloudPaths.push(toCloudPath(up) || fp);
-        }
-      } else {
-        // มีลิงก์แล้ว: upload only ทุกไฟล์
-        for (const fp of filePaths) {
-          const up = await this.uploadOnly({ folderName, filePath: fp });
-          cloudPaths.push(toCloudPath(up) || fp);
-        }
-      }
-
-      // append ลง DB ทีเดียว
-      await this.appendFileAddress(number, cloudPaths);
-
-      // สรุป
-      const latest=await this.getUserByNumber(number);
-      return {
-        nextcloud_link: latest.data.nextcloud_link,
-        file_count: latest.file_summary?.count ?? (latest.data.file_address?.length ?? 0),
-        last_files: cloudPaths
-      };
-    }
-
-    // fetch helpers
-    async _get(u){const r=await fetch(u);return this._handle(r)}
-    async _post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return this._handle(r)}
-    async _patch(u,b){const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return this._handle(r)}
+    // helpers
+    async _get(u){const r=await fetch(u); return this._handle(r)}
+    async _post(u,b){const r=await fetch(u,{method:'POST',headers:{},body: (b && !(b instanceof FormData)) ? JSON.stringify(b) : (b||null), ...(b && !(b instanceof FormData) ? {headers:{'Content-Type':'application/json'}}:{} )}); return this._handle(r)}
+    async _patch(u,b){const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return this._handle(r)}
     async _handle(r){ let data=null; try{data=await r.json()}catch{data={}} if(!r.ok || data?.ok===false){const e=new Error(data?.message||data?.error||`HTTP_${r.status}`); e.status=r.status; e.payload=data; throw e} return data }
   }
 
   // ===== Utilities =====
-  const $ = (sel) => document.querySelector(sel);
+  const $ = (s)=>document.querySelector(s);
   const logEl = $('#log');
-  function log(title, data){ const t = (typeof data==='string')? data : JSON.stringify(data, null, 2); logEl.textContent += `\n\n› ${title}\n` + t; logEl.scrollTop = logEl.scrollHeight; }
-  function clearLog(){ logEl.textContent = 'Ready.'; }
-  function splitPaths(input){
-    const s=(input||'').trim();
-    if(!s) return [];
-    // รองรับคั่นด้วย comma หรือขึ้นบรรทัดใหม่ หรือ |
-    return s.split(/[,|\r?\n]+/).map(t=>t.trim()).filter(Boolean);
+  function log(title, data){ const t=(typeof data==='string')?data:JSON.stringify(data,null,2); logEl.textContent += `\n\n› ${title}\n`+t; logEl.scrollTop=logEl.scrollHeight; }
+  function clearLog(){ logEl.textContent='Ready.'; }
+  function getCfg(){ return JSON.parse(localStorage.getItem('pb_cfg')||'{}'); }
+  function saveCfg(v){ localStorage.setItem('pb_cfg', JSON.stringify(v)); }
+  function api(){ const {mongoBase,ncBase}=getCfg(); return new PhotoboothClient({ mongoBase, ncBase }); }
+  function splitPaths(s){ const a=(s||'').trim(); if(!a) return []; return a.split(/[,|\r?\n]+/).map(t=>t.trim()).filter(Boolean); }
+
+  // derive preview url from relative path (for /api/nextcloud/preview)
+  function buildPreview(rel){ const {ncBase}=getCfg(); return `${ncBase.replace(/\/$/,'')}/api/nextcloud/preview?path=${encodeURIComponent(rel)}`; }
+  function deriveRelFromItem(it){
+    if (it?.path) return String(it.path).replace(/^\/+/,'');
+    if (it?.name) return String(it.name).replace(/^\/+/,'');
+    try{
+      if (it?.previewUrl){ const u=new URL(it.previewUrl); const f=u.searchParams.get('file'); if (f) return decodeURIComponent(f).replace(/^\/+/,''); }
+    }catch{}
+    try{
+      if (it?.downloadUrl){ const u=new URL(it.downloadUrl); const dir=u.searchParams.get('path'); const files=u.searchParams.get('files'); if(files){ const d=dir?decodeURIComponent(dir).replace(/^\/+/,''):''; return d?`${d}/${files}`:files; } }
+    }catch{}
+    return '';
+  }
+  function toCloudPath(resp){
+    const up = resp?.uploaded || resp || {};
+    const remote = up.remotePath || up.remote || '';
+    const folder = up.folder || up.folderPath || '';
+    const file   = up.file || up.fileName || '';
+    if (remote){ if (file && !remote.endsWith(file)) return `${remote.replace(/\/$/,'')}/${file}`; return remote; }
+    if (folder && file) return `${String(folder).replace(/\/$/,'')}/${file}`;
+    return file || folder || null;
   }
 
-  // Load/save config
-  const cfgEls = { mongoBase: $('#mongoBase'), ncBase: $('#ncBase') };
-  const saved = JSON.parse(localStorage.getItem('pb_cfg')||'{}');
-  if(saved.mongoBase) cfgEls.mongoBase.value=saved.mongoBase;
-  if(saved.ncBase) cfgEls.ncBase.value=saved.ncBase;
-  $('#saveCfg').onclick=()=>{ localStorage.setItem('pb_cfg', JSON.stringify({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value })); log('Saved config', localStorage.getItem('pb_cfg')); };
+  // ===== Init UI =====
+  const cfgSaved = getCfg();
+  if (cfgSaved.mongoBase) $('#cfg_mongo').value = cfgSaved.mongoBase;
+  if (cfgSaved.ncBase)    $('#cfg_nc').value    = cfgSaved.ncBase;
 
-  function getApi(){ return new PhotoboothClient({ mongoBase: cfgEls.mongoBase.value, ncBase: cfgEls.ncBase.value }); }
+  // Save & Ping
+  $('#btnSaveCfg').onclick = ()=>{ saveCfg({ mongoBase:$('#cfg_mongo').value.trim(), ncBase:$('#cfg_nc').value.trim() }); log('Saved config', getCfg()); };
+  $('#btnPing').onclick = async ()=>{
+    const {mongoBase,ncBase} = getCfg();
+    try{ const m = await fetch(`${mongoBase.replace(/\/$/,'')}/health`, {cache:'no-store'}).then(r=>r.json()); log('Ping Mongo', m); }catch(e){ log('Ping Mongo error', String(e)); }
+    try{ const n = await fetch(`${ncBase.replace(/\/$/,'')}/api/health`, {cache:'no-store'}).then(r=>r.json()); log('Ping Nextcloud', n); }catch(e){ log('Ping Nextcloud error', String(e)); }
+  };
 
-  // ===== Section 1 events =====
-  $('#btnEnsure').onclick = async () => {
-    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
-    try{ const res = await api.ensureUserAndPin({number,pin}); log('Ensure & Check OK', res); $('#up_number').value=number; $('#up_folder').value=number; }
-    catch(e){ log('Ensure error', {status:e.status, message:e.message, payload:e.payload}); }
+  // ===== User =====
+  $('#btnEnsureUser').onclick = async ()=>{
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim();
+    const cli=api();
+    try{ const r=await cli.ensureUser({number,pin}); log('EnsureUser', r); $('#up_folder').value = number; $('#gal_number').value = number; }
+    catch(e){ log('EnsureUser error', {status:e.status, message:e.message, payload:e.payload}); }
   };
-  $('#btnEnsureUserOnly').onclick = async () => {
-    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
-    try{ const r=await api.ensureUserOnly({number,pin}); log('Ensure User Only', r); $('#up_number').value=number; $('#up_folder').value=number; }
-    catch(e){ log('EnsureUserOnly error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnGetUser').onclick = async () => {
-    const number=$('#u_number').value.trim(); const api=getApi();
-    try{ log('GetUser', await api.getUserByNumber(number)); }
+  $('#btnGetUser').onclick = async ()=>{
+    const number=$('#u_number').value.trim(); const cli=api();
+    try{ const r=await cli.getUserByNumber(number); log('GetUser', r); }
     catch(e){ log('GetUser error', {status:e.status, message:e.message}); }
   };
-  $('#btnCreateUser').onclick = async () => {
-    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
-    try{ log('CreateUser', await api.createUser({number,pin})); }
+  $('#btnCreateUser').onclick = async ()=>{
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const cli=api();
+    try{ const r=await cli.createUser({number,pin}); log('CreateUser', r); }
     catch(e){ log('CreateUser error', {status:e.status, message:e.message, payload:e.payload}); }
   };
-  $('#btnCheckPin').onclick = async () => {
-    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const api=getApi();
-    try{ log('CheckPin', await api.checkPin({number,pin})); }
-    catch(e){ log('CheckPin error', {status:e.status, message:e.message}); }
+  $('#btnChangePin').onclick = async ()=>{
+    const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const cli=api();
+    try{ const r=await cli.changePin(number, pin); log('ChangePin', r); }
+    catch(e){ log('ChangePin error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+  $('#btnSyncPinCloud').onclick = async ()=>{
+    const number=$('#u_number').value.trim(); const newPin=$('#u_pin').value.trim(); const cli=api();
+    try{ const r=await cli.changePinAndSyncCloud({ number, newPin }); log('ChangePinAndSyncCloud', r); }
+    catch(e){ log('ChangePinAndSyncCloud error', {status:e.status, message:e.message, payload:e.payload}); }
   };
 
-  // ===== Section 2 events =====
-  $('#btnFlowUpload').onclick = async () => {
-    const api=getApi();
-    const number=$('#up_number').value.trim();
-    const folder=$('#up_folder').value.trim()||number;
-    const fileInput=$('#up_file').value;
-    const filePaths=splitPaths(fileInput);
-    const note=$('#up_note').value;
-    const linkPassword=$('#up_pass').value;
-    const expiration=$('#up_exp').value || undefined;
-
-    try {
-      if (filePaths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
-      const r = await api.uploadImagesForUser({ number, filePaths, folderName:folder, note, linkPassword, expiration });
-      log('Upload Flow result', r);
-
-      // ตรวจผลจาก DB
-      const latest = await api.getUserByNumber(number);
-      log('GetUser after', latest);
-    } catch(e){
-      log('Upload Flow error', {status:e.status, message:e.message, payload:e.payload});
-    }
-  };
-
-  $('#btnUploadShare').onclick = async () => {
-    const api=getApi();
-    const number=$('#up_number').value.trim();
-    const folder=$('#up_folder').value.trim() || number;
-    const filePaths=splitPaths($('#up_file').value);
-    const first = filePaths[0];
-    const note=$('#up_note').value;
-    const linkPassword=$('#up_pass').value;
-    const expiration=$('#up_exp').value || undefined;
+  // ===== Upload (bytes) =====
+  async function uploadBytesMany({ share }){
+    const files = $('#up_files').files;
+    const number = $('#u_number').value.trim();
+    const folder = $('#up_folder').value.trim() || number;
+    if (!files || files.length===0) { log('UploadBytes', 'กรุณาเลือกไฟล์'); return; }
+    const cli=api();
+    const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
 
     try{
-      if(!first) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์ (ไฟล์แรกจะถูกใช้แชร์ลิงก์)');
-      const r = await api.uploadAndShare({ folderName:folder, filePath:first, note, linkPassword, expiration });
-      log('Upload+Share', r);
-
-      if(r?.share?.url){
-        await api.setNextcloudLink(number, r.share.url);
-        log('Patched nextcloud_link to user', {number, link:r.share.url});
-      }
-
-      // บันทึก file_address ด้วย remotePath
-      const remote = r?.uploaded?.remotePath || `${r?.uploaded?.folder}/${r?.uploaded?.file}`;
-      if (remote) {
-        await api.appendFileAddress(number, [remote]);
-        log('Append file_address', {number, files:[remote]});
-      }
-    } catch(e){
-      log('Upload+Share error', {status:e.status, message:e.message, payload:e.payload});
-    }
-  };
-
-  $('#btnUploadOnly').onclick = async () => {
-    const api=getApi();
-    const number=$('#up_number').value.trim();
-    const folder=$('#up_folder').value.trim()||number;
-    const filePaths=splitPaths($('#up_file').value);
-
-    try{
-      if (filePaths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
-      const remotes = [];
-      for (const fp of filePaths) {
-        const r = await api.uploadOnly({ folderName:folder, filePath:fp });
-        log('UploadOnly', r);
-        const remote = r?.uploaded?.remotePath || `${r?.uploaded?.folder}/${r?.uploaded?.file}`;
+      const remotes=[];
+      for (let i=0;i<files.length;i++){
+        const f = files[i];
+        const res = await cli.uploadBytes({
+          folderName: folder,
+          file: f,
+          targetName: f.name,
+          share: share && i===0, // แชร์เฉพาะไฟล์แรก
+          note, linkPassword, expiration, forceNew:false
+        });
+        log(share && i===0 ? 'UploadBytes+Share' : 'UploadBytes', res);
+        const remote = toCloudPath(res);
         if (remote) remotes.push(remote);
+
+        // ถ้าสร้างลิงก์แชร์ได้ครั้งแรก -> patch ลง user
+        if (share && i===0 && res?.share?.url) {
+          await cli.setNextcloudLink(number, res.share.url);
+          log('Patched nextcloud_link', { number, link: res.share.url });
+        }
       }
-      if (remotes.length) {
-        await api.appendFileAddress(number, remotes);
-        log('Append file_address', {number, files: remotes});
+      if (remotes.length){
+        await cli.appendFileAddress(number, remotes);
+        log('Append file_address', { number, files: remotes });
       }
-    } catch(e){
-      log('UploadOnly error', {status:e.status, message:e.message, payload:e.payload});
+    }catch(e){
+      log('UploadBytes error', {status:e.status, message:e.message, payload:e.payload});
+    }
+  }
+  $('#btnUploadBytesShare').onclick = ()=>uploadBytesMany({ share:true });
+  $('#btnUploadBytesOnly').onclick  = ()=>uploadBytesMany({ share:false });
+
+  // ===== Upload (server paths โหมดเดิม) =====
+  $('#btnFlowUpload').onclick = async ()=>{
+    const cli=api(); const number=$('#u_number').value.trim();
+    const folder=$('#up_folder').value.trim() || number;
+    const paths = splitPaths($('#up_server_paths').value);
+    const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
+    try{
+      if (paths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
+      // ensure user ก่อน
+      await cli.ensureUser({ number, pin: $('#u_pin').value.trim() });
+
+      const user = (await cli.getUserByNumber(number)).data;
+      const remotes=[];
+      if (!user.nextcloud_link){
+        const up1 = await cli.uploadAndShare({ folderName:folder, filePath: paths[0], note, linkPassword, expiration });
+        log('Upload+Share (first)', up1);
+        if (up1?.share?.url) await cli.setNextcloudLink(number, up1.share.url);
+        const rp1 = toCloudPath(up1); if (rp1) remotes.push(rp1);
+        for (const fp of paths.slice(1)){
+          const r = await cli.uploadOnly({ folderName:folder, filePath: fp });
+          log('UploadOnly', r);
+          const rp = toCloudPath(r); if (rp) remotes.push(rp);
+        }
+      } else {
+        for (const fp of paths){
+          const r = await cli.uploadOnly({ folderName:folder, filePath: fp });
+          log('UploadOnly', r);
+          const rp = toCloudPath(r); if (rp) remotes.push(rp);
+        }
+      }
+      if (remotes.length){
+        await cli.appendFileAddress(number, remotes);
+        log('Append file_address', { number, files: remotes });
+      }
+    }catch(e){ log('FlowUpload error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+
+  $('#btnUploadShare').onclick = async ()=>{
+    const cli=api(); const number=$('#u_number').value.trim();
+    const folder=$('#up_folder').value.trim() || number;
+    const first = splitPaths($('#up_server_paths').value)[0];
+    const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
+    try{
+      if(!first) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์ (บรรทัดแรก)');
+      const r = await cli.uploadAndShare({ folderName:folder, filePath:first, note, linkPassword, expiration });
+      log('Upload+Share', r);
+      if (r?.share?.url){ await cli.setNextcloudLink(number, r.share.url); log('Patched nextcloud_link', {number, link:r.share.url}); }
+      const remote = toCloudPath(r); if (remote) { await cli.appendFileAddress(number, [remote]); log('Append file_address', {number, files:[remote]}); }
+    }catch(e){ log('Upload+Share error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+
+  $('#btnUploadOnly').onclick = async ()=>{
+    const cli=api(); const number=$('#u_number').value.trim(); const folder=$('#up_folder').value.trim()||number;
+    const paths = splitPaths($('#up_server_paths').value);
+    try{
+      if (paths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
+      const remotes=[];
+      for (const fp of paths){
+        const r = await cli.uploadOnly({ folderName:folder, filePath: fp });
+        log('UploadOnly', r);
+        const rp = toCloudPath(r); if (rp) remotes.push(rp);
+      }
+      if (remotes.length){ await cli.appendFileAddress(number, remotes); log('Append file_address', {number, files: remotes}); }
+    }catch(e){ log('UploadOnly error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
+
+  // ===== Gallery =====
+  $('#btnLoadGallery').onclick = async ()=>{
+    const number = $('#gal_number').value.trim() || $('#u_number').value.trim();
+    const cli=api(); const info=$('#galleryInfo'); const cont=$('#thumbs');
+    cont.innerHTML=''; info.textContent='Loading…';
+    try{
+      const u = await cli.getUserByNumber(number);
+      const link = u?.data?.nextcloud_link || null;
+      const cnt  = u?.file_summary?.count ?? (Array.isArray(u?.data?.file_address)?u.data.file_address.length:0);
+      info.innerHTML = `Total <b>${cnt}</b>${link ? ` • <span class="badge">link ready</span>`:''}`;
+      const g = await cli.getUserGallery(number);
+      const files = (g?.files||[]).filter(it=>{
+        const n = (it?.name||'').toLowerCase();
+        return /\.(jpe?g|png|webp|gif|bmp|avif)$/.test(n);
+      });
+      if (files.length===0){ cont.innerHTML='<div class="muted">No photos.</div>'; return; }
+      cont.innerHTML = files.map(it=>{
+        const rel = deriveRelFromItem(it);
+        const src = buildPreview(rel);
+        return `<div class="thumb"><img src="${src}" alt=""></div>`;
+      }).join('');
+    }catch(e){
+      info.textContent='Load failed.'; log('LoadGallery error', {status:e.status, message:e.message, payload:e.payload});
     }
   };
 
-  // ===== Section 3 events =====
-  $('#btnPromoCreate').onclick = async () => {
-    const api=getApi(); const code=$('#pm_code').value.trim(); const type=$('#pm_type').value; const value=Number($('#pm_value').value||0);
+  // ===== Promo =====
+  $('#btnPromoCreate').onclick = async ()=>{
+    const cli=api(); const code=$('#pm_code').value.trim(); const type=$('#pm_type').value; const value=Number($('#pm_value').value||0);
     try{
       const now=new Date(); const end=new Date(Date.now()+86400000*30);
       const body={ code, type, value, start_at: now, end_at: end, usage_limit:1000, per_user_limit:1, is_active:true };
-      const r=await api.createPromo(body); log('Promo created', r);
-    } catch(e){ log('Promo create error', {status:e.status, message:e.message, payload:e.payload}); }
+      const r=await cli.createPromo(body); log('Promo created', r);
+    }catch(e){ log('Promo create error', {status:e.status, message:e.message, payload:e.payload}); }
   };
-  $('#btnPromoValidate').onclick = async () => {
-    const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
-    try{ const r=await api.validatePromo(code,{userNumber:number, orderAmount:amt}); log('Promo validate', r); }
+  $('#btnPromoValidate').onclick = async ()=>{
+    const cli=api(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
+    try{ const r=await cli.validatePromo(code,{userNumber:number, orderAmount:amt}); log('Promo validate', r); }
     catch(e){ log('Promo validate error', {status:e.status, message:e.message, payload:e.payload}); }
   };
-  $('#btnPromoRedeem').onclick = async () => {
-    const api=getApi(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
-    try{ const r=await api.redeemPromo(code,{userNumber:number, orderAmount:amt}); log('Promo redeem', r); }
+  $('#btnPromoRedeem').onclick = async ()=>{
+    const cli=api(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
+    try{ const r=await cli.redeemPromo(code,{userNumber:number, orderAmount:amt}); log('Promo redeem', r); }
     catch(e){ log('Promo redeem error', {status:e.status, message:e.message, payload:e.payload}); }
   };
-  $('#btnPromoList').onclick = async () => {
-    const api=getApi();
-    try{ log('Promo list (active)', await api.listPromos({active:true})); }
+  $('#btnPromoList').onclick = async ()=>{
+    const cli=api();
+    try{ const r=await cli.listPromos({active:true}); log('Promo list (active)', r); }
     catch(e){ log('Promo list error', {status:e.status, message:e.message}); }
   };
 
-  // Log helpers
-  $('#clearLog').onclick = clearLog;
-</script>
+  // ===== Cloud Link Password =====
+  $('#btnChangeSharePass').onclick = async ()=>{
+    const folderName=$('#cp_folder').value.trim();
+    const newPassword=$('#cp_newpass').value; // เว้นว่าง = ลบรหัส
+    const expiration=$('#cp_exp').value;      // "" = ลบวันหมดอายุ, undefined = ไม่แตะ
+    const note=$('#cp_note').value;
+    const pubSel=$('#cp_pub').value;
+    const publicUpload = pubSel==='' ? undefined : (pubSel==='true');
+    const permRaw=$('#cp_perm').value.trim();
+    const permissions = permRaw==='' ? undefined : Number(permRaw);
+    const cli=api();
+    try{
+      const r = await cli.changeSharePassword({ folderName, newPassword, expiration, note, publicUpload, permissions });
+      log('ChangeSharePassword', r);
+    }catch(e){ log('ChangeSharePassword error', {status:e.status, message:e.message, payload:e.payload}); }
+  };
 
+  // Log clear
+  $('#btnClearLog').onclick = clearLog;
+</script>
 </body>
 </html>

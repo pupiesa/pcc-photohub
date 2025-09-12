@@ -6,11 +6,13 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import axios from 'axios';
 import https from 'https';
+import multer from 'multer';
 import mime from 'mime-types';
 
-const app = express()
+const app = express();
 const port = process.env.NEXTCLOUD_PORT;
 
+// ----- CORS -----
 const raw = process.env.CORS_ALLOW_ORIGINS || "";
 const allowlist = raw.split(",").map(s => s.trim()).filter(Boolean);
 const allowNoOrigin = true;
@@ -33,9 +35,10 @@ app.options("*", cors(corsOptions));
 // ==== Nextcloud config ====
 const username   = process.env.NEXTCLOUD_Username;
 const ncPassword = process.env.NEXTCLOUD_Password;
-const webdavUrl  = process.env.NEXTCLOUD_webdavUrl;
-const ocsApiUrl  = process.env.NEXTCLOUD_ocsApiUrl;
+const webdavUrl  = process.env.NEXTCLOUD_webdavUrl;   // e.g. http(s)://host/remote.php/dav/files/<user>
+const ocsApiUrl  = process.env.NEXTCLOUD_ocsApiUrl;   // e.g. http(s)://host/ocs/v2.php/apps/files_sharing/api/v1
 
+// (optional) direct preview base, used as 2nd attempt if webdav client getFileContents fails
 const previewBase = process.env.NEXTCLOUD_PREVIEW
   ? process.env.NEXTCLOUD_PREVIEW.replace(/\/$/, "")
   : null;
@@ -53,8 +56,32 @@ const webdavClient = createClient(webdavUrl, {
   httpsAgent
 });
 
+////////////////////////////////////////////////////////////
+const ALLOWED_IMAGE_MIMES = new Set([
+  'image/jpeg','image/png','image/webp','image/gif','image/bmp','image/avif','image/heif','image/heic'
+]);
+const ALLOWED_IMAGE_EXTS = new Set(['.jpg','.jpeg','.png','.webp','.gif','.bmp','.avif','.heif','.heic']);
+
+function isAllowedImage(name = '', mimetype = '') {
+  const ext = '.' + String(name).split('.').pop()?.toLowerCase();
+  return ALLOWED_IMAGE_MIMES.has(String(mimetype).toLowerCase()) || ALLOWED_IMAGE_EXTS.has(ext);
+}
+
+const uploadImagesOnly = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB ปรับได้
+  fileFilter(req, file, cb) {
+    if (isAllowedImage(file.originalname, file.mimetype)) return cb(null, true);
+    const err = new Error('ONLY_IMAGE_ALLOWED');
+    err.status = 415; // Unsupported Media Type
+    return cb(err);
+  },
+});
+////////////////////////////////////////////////////////////
+
 // ===== Helpers =====
 async function getExistingPublicShare(cleanPath) {
+  // cleanPath: "/<folderName>"
   const resp = await axios.get(`${ocsApiUrl}/shares`, {
     params: { format: 'json', path: cleanPath },
     auth: { username, password: ncPassword },
@@ -66,15 +93,34 @@ async function getExistingPublicShare(cleanPath) {
   return list.find(s => String(s.share_type) === '3' && s.path === cleanPath) || null;
 }
 
+// ✅ Updated: รองรับการ "ลบรหัส" (ส่ง newPassword = ""), และ "ลบวันหมดอายุ" (expiration = ""/null)
 async function maybeUpdateShare(shareId, { note, linkPassword, expiration, permissions, publicUpload }) {
   const params = new URLSearchParams();
-  if (note) params.set('note', note);
-  if (linkPassword) params.set('password', linkPassword);
-  if (expiration) params.set('expireDate', new Date(expiration).toISOString().split('T')[0]);
-  if (typeof permissions !== 'undefined') params.set('permissions', String(permissions));
-  if (typeof publicUpload !== 'undefined') {
-    params.set('publicUpload', (publicUpload === true || String(publicUpload) === 'true') ? 'true' : 'false');
+
+  // note: ตั้งค่าแม้เป็น "" (ลบก็ได้)
+  if (note !== undefined) params.set('note', note);
+
+  // password:
+  // - undefined => ไม่แก้
+  // - "" (สตริงว่าง) => ลบรหัส
+  // - ปกติ => ตั้งรหัสใหม่
+  if (linkPassword !== undefined) params.set('password', linkPassword);
+
+  // expireDate:
+  // - undefined => ไม่แก้
+  // - "" หรือ null => ลบวันหมดอายุ
+  // - "YYYY-MM-DD" => ตั้งวันหมดอายุ
+  if (expiration !== undefined) {
+    if (expiration) {
+      params.set('expireDate', new Date(expiration).toISOString().split('T')[0]);
+    } else {
+      params.set('expireDate', '');
+    }
   }
+
+  if (permissions !== undefined) params.set('permissions', String(permissions));
+  if (publicUpload !== undefined) params.set('publicUpload', publicUpload ? 'true' : 'false');
+
   if ([...params.keys()].length === 0) return;
 
   await axios.put(`${ocsApiUrl}/shares/${shareId}?format=json`, params.toString(), {
@@ -99,7 +145,6 @@ function pickFirstPath({ filePath, filePaths }) {
   }
   return '';
 }
-
 
 // ==== Upload + Share (no QR) with de-dup ====
 app.post('/api/nextcloud/upload-and-share', async (req, res) => {
@@ -159,7 +204,7 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
         try {
           await maybeUpdateShare(shareId, { note, linkPassword, expiration, permissions, publicUpload });
         } catch (e) {
-          console.warn('Failed to update existing share:', e.response?.data || e.message);
+          console.warn('Failed to update existing share:', e?.response?.data || e?.message);
         }
       }
     }
@@ -170,10 +215,10 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
       form.set('path', cleanPath);
       form.set('shareType', '3');
       form.set('permissions', String(permissions));
-      if (linkPassword) form.set('password', linkPassword);
+      if (linkPassword !== undefined) form.set('password', linkPassword || "");
       if (expiration) form.set('expireDate', new Date(expiration).toISOString().split('T')[0]);
-      if (typeof publicUpload !== 'undefined') {
-        form.set('publicUpload', (publicUpload === true || String(publicUpload) === 'true') ? 'true' : 'false');
+      if (publicUpload !== undefined) {
+        form.set('publicUpload', publicUpload ? 'true' : 'false');
       }
 
       const createResp = await axios.post(`${ocsApiUrl}/shares?format=json`, form.toString(), {
@@ -195,9 +240,9 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
       shareId = data?.id;
       shareLink = data?.url;
 
-      if (note && shareId) {
+      if (note !== undefined && shareId) {
         try { await maybeUpdateShare(shareId, { note }); }
-        catch (e) { console.warn('Failed to set note on new share:', e.response?.data || e.message); }
+        catch (e) { console.warn('Failed to set note on new share:', e?.response?.data || e?.message); }
       }
     }
 
@@ -222,7 +267,6 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
     return res.status(500).json({ error: `Upload+Share failed: ${error.message}`, raw: error.response?.data });
   }
 });
-
 
 // (Optional) upload only
 app.post('/api/nextcloud/upload', async (req, res) => {
@@ -337,8 +381,8 @@ app.get("/api/nextcloud/list", async (req, res) => {
       ok: true,
       path: `/${dir}`,
       items: items.map((it) => ({
-        type: it.type,          
-        filename: it.filename,  
+        type: it.type,
+        filename: it.filename,
         basename: it.basename,
         size: it.size,
         lastmod: it.lastmod,
@@ -350,10 +394,87 @@ app.get("/api/nextcloud/list", async (req, res) => {
   }
 });
 
+app.post('/api/nextcloud/upload-bytes', uploadImagesOnly.single('file'), async (req, res) => {
+  try {
+    const folderName = (req.body?.folderName || '').trim();
+    const targetName = (req.body?.targetName || '').trim();
+    const f = req.file;
+
+    if (!folderName) return res.status(400).json({ ok:false, message:'folderName required' });
+    if (!f)          return res.status(400).json({ ok:false, message:'file required (image only)' });
+
+    // สร้างโฟลเดอร์ถ้ายังไม่มี
+    const folderPath = `files/${username}/${folderName}`;
+    try { await webdavClient.createDirectory(folderPath); }
+    catch (err) { if (err?.response?.status !== 405) throw err; }
+
+    const name = targetName || f.originalname || `upload-${Date.now()}`;
+    const davRemotePath = `${folderPath}/${name}`;
+
+    await webdavClient.putFileContents(davRemotePath, f.buffer, {
+      overwrite: true,
+      contentType: ALLOWED_IMAGE_MIMES.has(f.mimetype) ? f.mimetype : (mime.lookup(name) || 'application/octet-stream')
+    });
+
+    return res.json({
+      ok: true,
+      message: 'Uploaded',
+      uploaded: { folder: `/${folderName}`, file: name, remotePath: `/${folderName}/${name}` }
+    });
+  } catch (e) {
+    const status = e?.status || (e?.message === 'ONLY_IMAGE_ALLOWED' ? 415 : 500);
+    const msg = e?.message === 'ONLY_IMAGE_ALLOWED' ? 'ONLY_IMAGE_ALLOWED' : 'UPLOAD_BYTES_FAILED';
+    console.error('upload-bytes error:', e?.response?.data || e);
+    return res.status(status).json({ ok:false, message: msg, error: e?.message || String(e) });
+  }
+});
+
+/** ✅ NEW: เปลี่ยน/ลบรหัสผ่านของ public share ของโฟลเดอร์ (ใช้ folderName = เบอร์ผู้ใช้) */
+app.post('/api/nextcloud/change-share-password', async (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      return res.status(400).json({ ok: false, message: 'Content-Type must be application/json' });
+    }
+
+    const { folderName, newPassword, expiration, note, publicUpload, permissions } = req.body || {};
+    if (!folderName) return res.status(400).json({ ok: false, message: 'folderName is required' });
+
+    const cleanPath = `/${String(folderName).replace(/^\/+/, '')}`;
+    const share = await getExistingPublicShare(cleanPath);
+    if (!share) return res.status(404).json({ ok: false, message: 'PUBLIC_SHARE_NOT_FOUND' });
+
+    await maybeUpdateShare(share.id, {
+      linkPassword: newPassword !== undefined ? String(newPassword) : undefined,
+      expiration,
+      note,
+      publicUpload,
+      permissions,
+    });
+
+    // อ่านใหม่หลังอัปเดต
+    const updated = await getExistingPublicShare(cleanPath);
+
+    res.json({
+      ok: true,
+      message:
+        newPassword === '' || newPassword === null
+          ? 'PASSWORD_CLEARED'
+          : (newPassword === undefined ? 'UPDATED' : 'PASSWORD_UPDATED'),
+      share: {
+        id: updated?.id ?? share.id,
+        url: updated?.url ?? share.url,
+        path: updated?.path ?? cleanPath,
+      },
+    });
+  } catch (e) {
+    console.error('change-share-password error:', e?.response?.data || e?.message);
+    res.status(e?.response?.status || 500).json({ ok: false, message: 'CHANGE_PASSWORD_FAILED' });
+  }
+});
+
+// Health
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.head('/api/health', (_req, res) => res.status(200).end());
-
-
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
