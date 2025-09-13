@@ -60,6 +60,7 @@ const UserSchema = new mongoose.Schema(
         message: 'gmail Must end with @gmail.com only.',
       },
     },
+    consented: { type: Boolean, default: false },
   },
   { timestamps: true, versionKey: false, collection: 'user' }
 );
@@ -472,6 +473,40 @@ app.put('/api/user/:number/gmail', async (req, res) => {
     return res.status(500).json({ ok: false, message: 'server error' });
   }
 });
+
+// ===== Set consented =====
+// PUT /api/user/:number/consented/true
+app.put('/api/user/:number/consented/true', async (req, res) => {
+  try {
+    const number = String(req.params.number || '').trim();
+    if (!number) return res.status(400).json({ ok: false, message: 'number (params) is required' });
+
+    // อัปเดตเฉพาะถ้ายังไม่เป็น true
+    const updated = await User.findOneAndUpdate(
+      { number, consented: { $ne: true } },
+      { $set: { consented: true } },
+      { new: true }
+    );
+
+    // ไม่พบเลย?
+    if (!updated) {
+      // เช็กว่ามี user ไหม แต่ consented เป็น true อยู่แล้วหรือไม่พบ user
+      const exists = await User.findOne({ number }, { number: 1, consented: 1 }).lean();
+      if (!exists) return res.status(404).json({ ok: false, message: 'User_not_found' });
+      if (exists.consented === true) {
+        return res.json({ ok: true, message: 'Already_true', data: { number: exists.number, consented: true } });
+      }
+      // กรณีอื่น ๆ (เช่น ฟิลด์หายาก) ให้ตอบ not modified
+      return res.status(304).json({ ok: false, message: 'Not_modified' });
+    }
+
+    return res.json({ ok: true, message: 'Set_to_true', data: { number: updated.number, consented: updated.consented } });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, message: 'server error' });
+  }
+});
+
 
 // Health
 app.get('/health', (req, res) => res.json({ ok: true }));
