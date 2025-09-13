@@ -48,12 +48,23 @@ const UserSchema = new mongoose.Schema(
   {
     number: { type: String, required: true, unique: true, index: true },
     pin: { type: String, required: true },
-    // NOTE: kept your alias typo compatibility (flie_addr) but primary field is file_address
     file_address: { type: [String], alias: 'flie_addr', default: [] },
-    nextcloud_link: { type: String, default: null }
+    nextcloud_link: { type: String, default: null },
+    gmail: {
+      type: String,
+      default: null,
+      lowercase: true,
+      trim: true,
+      validate: {
+        validator: (v) => v === null || /^[a-z0-9._%+-]+@gmail\.com$/i.test(v),
+        message: 'gmail Must end with @gmail.com only.',
+      },
+    },
   },
   { timestamps: true, versionKey: false, collection: 'user' }
 );
+
+UserSchema.index({ gmail: 1 }, { unique: true, sparse: true });
 
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('pin')) return next();
@@ -415,6 +426,50 @@ app.post('/api/promos/:code/redeem', async (req, res) => {
     res.json({ ok: true, discount: result.discount });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/api/user/:number/gmail', async (req, res) => {
+  try {
+    const number = String(req.params.number);
+    const raw = Object.prototype.hasOwnProperty.call(req.body, 'gmail') ? req.body.gmail : undefined;
+
+    if (typeof number !== 'string' || !number.trim()) {
+      return res.status(400).json({ ok: false, message: 'number (params) is required' });
+    }
+    if (raw === undefined) {
+      return res.status(400).json({ ok: false, message: 'body.gmail is required (string or null)' });
+    }
+
+    const shouldRemove = raw === null || (typeof raw === 'string' && raw.trim() === '');
+    let gmail = null;
+
+    if (!shouldRemove) {
+      gmail = String(raw).toLowerCase().trim();
+      if (!/^[a-z0-9._%+-]+@gmail\.com$/i.test(gmail)) {
+        return res.status(400).json({ ok: false, message: 'gmail Must end with @gmail.com only.' });
+      }
+    }
+
+    const updated = await User.findOneAndUpdate(
+      { number },
+      { $set: { gmail } },
+      { new: true }
+    );
+
+    if (!updated) return res.status(404).json({ ok: false, message: 'User_not_found' });
+
+    return res.json({
+      ok: true,
+      action: shouldRemove ? 'removed' : (updated.gmail ? 'set' : 'removed'),
+      data: { number: updated.number, gmail: updated.gmail },
+    });
+  } catch (e) {
+    if (e?.code === 11000) {
+      return res.status(409).json({ ok: false, message: 'gmail is already in use' });
+    }
+    console.error(e);
+    return res.status(500).json({ ok: false, message: 'server error' });
   }
 });
 
