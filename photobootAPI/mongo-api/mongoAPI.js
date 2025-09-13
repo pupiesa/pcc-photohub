@@ -398,7 +398,6 @@ app.put('/api/user/:number/consented/true', async (req, res) => {
   }
 });
 
-// Health (อันที่สอง) — คงไว้ตามเดิม
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.head('/api/health', (_req, res) => res.status(200).end());

@@ -4,20 +4,23 @@ import { spawn } from 'node:child_process';
 /** ------------ CONFIG ------------- */
 const MONGO_BASE = process.env.NEXT_PUBLIC_MONGO_BASE || ''; // e.g. http://localhost:2000
 const NC_BASE    = process.env.NEXT_PUBLIC_NC_BASE || '';    // e.g. http://localhost:1000
+const SMTP_BASE  = process.env.NEXT_PUBLIC_SMTP_BASE || '';  // e.g. http://localhost:3001 (optional)
 
 const CHECK_INTERVAL_MS   = 30_000;
-const STARTUP_GRACE_MS    = 5_000;  
-const TIMEOUT_MS          = 5_000;  
-const FAIL_THRESHOLD = {            
+const STARTUP_GRACE_MS    = 5_000;
+const TIMEOUT_MS          = 5_000;
+const FAIL_THRESHOLD = {
   mongo: 1,
   nc: 1,
+  smtp: 1,
 };
 const COOLDOWN_MS = 5_000;
 
 /** ------------ STATE ------------- */
 const procs = {
-  mongo: { child: null, fails: 0, cooldownUntil: 0, name: 'mongo', base: MONGO_BASE, path: '/api/health' },
-  nc:    { child: null, fails: 0, cooldownUntil: 0, name: 'nextcloud', base: NC_BASE, path: '/api/health' },
+  mongo: { child: null, fails: 0, cooldownUntil: 0, name: 'mongo',     base: MONGO_BASE, path: '/api/health' },
+  nc:    { child: null, fails: 0, cooldownUntil: 0, name: 'nextcloud', base: NC_BASE,    path: '/api/health' },
+  smtp:  { child: null, fails: 0, cooldownUntil: 0, name: 'smtp',      base: SMTP_BASE,  path: '/' }, // smtp ไม่มี /api/health ก็เช็ค /
   ui:    { child: null, name: 'ui' },
 };
 
@@ -71,6 +74,7 @@ function startMongo() {
     procs.mongo.child = null;
   });
 }
+
 function startNC() {
   if (procs.nc.child) return;
   log('nextcloud', 'starting...', 'green');
@@ -80,6 +84,17 @@ function startNC() {
     procs.nc.child = null;
   });
 }
+
+function startSMTP() {
+  if (procs.smtp.child) return;
+  log('smtp', 'starting...', 'green');
+  procs.smtp.child = spawn('node', ['--env-file=.env', 'photobootAPI/smtp-api/smtpAPI.js'], { stdio: 'inherit', shell: true });
+  procs.smtp.child.on('exit', (code, sig) => {
+    log('smtp', `exited (code=${code} sig=${sig})`, 'yellow');
+    procs.smtp.child = null;
+  });
+}
+
 function startUI() {
   if (procs.ui.child) return;
   log('ui', 'starting...', 'cyan');
@@ -103,7 +118,8 @@ async function restart(which) {
   await killTree(child);
 
   if (which === 'mongo') startMongo();
-  if (which === 'nc') startNC();
+  if (which === 'nc')    startNC();
+  if (which === 'smtp')  startSMTP();
 }
 
 /** ------------ HEALTH LOOP ------------- */
@@ -112,13 +128,13 @@ async function checkOne(which) {
   if (!p) return;
 
   if (!p.child) {
-    if (which === 'mongo') {
-    startMongo();
-    } else {
-    startNC();
-    }
+    if (which === 'mongo') startMongo();
+    else if (which === 'nc') startNC();
+    else if (which === 'smtp') startSMTP();
     await new Promise(r => setTimeout(r, STARTUP_GRACE_MS));
   }
+
+  if (which === 'ui') return; // ui ไม่เช็ค health
 
   const ok = await ping(p.base, p.path);
   if (ok) {
@@ -129,19 +145,21 @@ async function checkOne(which) {
 
   p.fails++;
   log(which, `health FAIL (${p.fails})`, 'red');
-  const need = (which === 'mongo' ? FAIL_THRESHOLD.mongo : FAIL_THRESHOLD.nc);
+  const need = FAIL_THRESHOLD[which];
   if (p.fails >= need) await restart(which);
 }
 
 async function healthLoop() {
   await checkOne('mongo');
-  await checkOne('nc');   
+  await checkOne('nc');
+  await checkOne('smtp');
 }
 
 /** ------------ MAIN ------------- */
 function main() {
   startMongo();
   startNC();
+  startSMTP();
   startUI();
 
   setTimeout(healthLoop, STARTUP_GRACE_MS);
@@ -151,6 +169,7 @@ function main() {
     log('supervisor', 'shutting down...', 'yellow');
     await killTree(procs.mongo.child);
     await killTree(procs.nc.child);
+    await killTree(procs.smtp.child);
     await killTree(procs.ui.child);
     process.exit(0);
   };
