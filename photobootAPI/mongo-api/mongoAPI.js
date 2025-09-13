@@ -1,9 +1,9 @@
+// server.js
 import 'dotenv/config';
 import express from 'express';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import cors from 'cors';
-
 
 const app = express();
 const raw = process.env.CORS_ALLOW_ORIGINS || "";
@@ -25,11 +25,11 @@ app.use(express.json());
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true })); // คงไว้ตามเดิม
 
 // ====== Mongo URI  ======
 const uri = process.env.MONGODB_URI;
-const port = process.env.MONGODB_PORT;
+const port = process.env.MONGODB_PORT; // คงไว้ตามเดิม
 if (!uri) {
   console.warn('⚠️ Missing some Check .env file.');
 }
@@ -52,11 +52,11 @@ const UserSchema = new mongoose.Schema(
     nextcloud_link: { type: String, default: null },
     gmail: {
       type: String,
-      default: null,
       lowercase: true,
       trim: true,
+      // เอา default:null ออก เพื่อไม่ให้มีฟิลด์ gmail ที่เป็น null ติดในเอกสาร
       validate: {
-        validator: (v) => v === null || /^[a-z0-9._%+-]+@gmail\.com$/i.test(v),
+        validator: (v) => v == null || /^[a-z0-9._%+-]+@gmail\.com$/i.test(v),
         message: 'gmail Must end with @gmail.com only.',
       },
     },
@@ -65,7 +65,14 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true, versionKey: false, collection: 'user' }
 );
 
-UserSchema.index({ gmail: 1 }, { unique: true, sparse: true });
+// ใช้ partial unique index (แทน unique+sparse) — index เฉพาะเอกสารที่ gmail เป็น string จริง ๆ
+UserSchema.index(
+  { gmail: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { gmail: { $type: "string" } }
+  }
+);
 
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('pin')) return next();
@@ -96,6 +103,26 @@ UserSchema.methods.comparePin = function (rawPin) {
 };
 
 const User = mongoose.model('User', UserSchema);
+
+// ===== Auto-migration ตอนบูท =====
+// - ลบ index gmail เดิม (ถ้าเคยสร้างไว้แบบ unique+sparse)
+// - เอาฟิลด์ gmail:null ออก (ให้ฟิลด์หายไปเลย)
+// - สร้าง partial unique index ใหม่
+(async () => {
+  try {
+    try { await User.collection.dropIndex('gmail_1'); } catch {}
+    await User.updateMany({ gmail: null }, { $unset: { gmail: "" } });
+    try {
+      await User.collection.createIndex(
+        { gmail: 1 },
+        { unique: true, partialFilterExpression: { gmail: { $type: "string" } } }
+      );
+    } catch {}
+    console.log('🛠️ User.gmail index migrated');
+  } catch (e) {
+    console.warn('⚠️ Migration warning:', e?.message || e);
+  }
+})();
 
 // --------------------- USER Endpoints ---------------------
 // 1) ค้นหาด้วยเบอร์ + นับไฟล์ + เอาไฟล์แรก
@@ -156,11 +183,8 @@ app.get('/api/user/:number/gallery', async (req, res) => {
       const pathParam = parent ? `%2F${encSegs(parent)}` : '%2F';    // "/Folder" หรือ "/"
 
       const previews = [
-        // core/preview (แนะนำ)
         `${origin}/index.php/core/preview.png?file=${fileParam}&x=512&y=512&a=1&mode=cover&t=${encodeURIComponent(token)}`,
-        // ajax/publicpreview (รุ่นเก่า)
         `${origin}/index.php/apps/files_sharing/ajax/publicpreview.php?x=512&y=512&a=1&t=${encodeURIComponent(token)}&file=${fileParam}`,
-        // เส้นทาง preview ของ public share บางรุ่น
         `${origin}/s/${encodeURIComponent(token)}/preview?file=${fileParam}&x=512&y=512&a=1`,
       ];
 
@@ -175,24 +199,43 @@ app.get('/api/user/:number/gallery', async (req, res) => {
     res.status(500).json({ ok: false, message: 'server error' });
   }
 });
-// 2) สร้างผู้ใช้ใหม่ (PIN จะถูก hash อัตโนมัติ)
+
+// 2) สร้างผู้ใช้ใหม่ (PIN จะถูก hash อัตโนมัติ) — ปรับให้ไม่เซ็ต gmail ถ้าไม่ได้ส่ง และ map duplicate ให้ตรงฟิลด์
 app.post('/api/user', async (req, res) => {
   try {
-    const { number, pin, file_address, flie_addr, nextcloud_link } = req.body;
+    const { number, pin, file_address, flie_addr, nextcloud_link, gmail } = req.body;
     if (!number || !pin) return res.status(400).json({ ok: false, message: 'Must have number and pin' });
 
     const files = Array.isArray(file_address) ? file_address : Array.isArray(flie_addr) ? flie_addr : [];
 
-    const created = await User.create({
+    const payload = {
       number: String(number),
       pin: String(pin),
       file_address: files.map(String),
       nextcloud_link: typeof nextcloud_link === 'string' ? nextcloud_link : null
-    });
+    };
+
+    // ใส่ gmail เฉพาะเมื่อส่งมาและ valid
+    if (gmail != null) {
+      const g = String(gmail).trim().toLowerCase();
+      if (!/^[a-z0-9._%+-]+@gmail\.com$/i.test(g)) {
+        return res.status(400).json({ ok: false, message: 'gmail Must end with @gmail.com only.' });
+      }
+      payload.gmail = g;
+    }
+
+    const created = await User.create(payload);
 
     res.status(201).json({ ok: true, id: created._id, data: { number: created.number } });
   } catch (e) {
-    if (e.code === 11000) return res.status(409).json({ ok: false, message: 'This number already exists.' });
+    if (e?.code === 11000) {
+      const key = Object.keys(e.keyPattern || {})[0] || 'unique_key';
+      const map = {
+        number: 'This number already exists.',
+        gmail:  'This gmail is already in use.'
+      };
+      return res.status(409).json({ ok: false, message: map[key] || 'Duplicate key.' });
+    }
     console.error(e);
     res.status(500).json({ ok: false, message: 'server error' });
   }
@@ -283,153 +326,6 @@ app.patch('/api/user/:number/pin', async (req, res) => {
   }
 });
 
-// =============================================================
-// ============   PROMO: Schemas & Endpoints   ================
-// =============================================================
-const PromoCodeSchema = new mongoose.Schema({
-  code: { type: String, required: true, unique: true, index: true },
-  type: { type: String, enum: ['percent','fixed'], required: true },
-  value: { type: Number, required: true, min: 0 },
-  start_at: { type: Date, required: true },
-  end_at: { type: Date, required: true },
-  usage_limit: { type: Number, required: true, min: 0 },
-  used_count: { type: Number, default: 0, min: 0 },
-  per_user_limit: { type: Number, default: 1, min: 0 },
-  is_active: { type: Boolean, default: true }
-}, { timestamps: true, collection: 'promocodes' });
-
-const PromoCode = mongoose.model('PromoCode', PromoCodeSchema);
-
-const PromoRedemptionSchema = new mongoose.Schema({
-  promo_code: { type: String, index: true, required: true },
-  user_number: { type: String, index: true, required: true },
-}, { timestamps: { createdAt: 'created_at', updatedAt: false }, collection: 'promo_redemptions' });
-
-const PromoRedemption = mongoose.model('promo_redemptions', PromoRedemptionSchema);
-
-PromoCode.createIndexes();
-PromoRedemption.createIndexes();
-
-function withinDateRange(promo, now) { return promo.start_at <= now && promo.end_at >= now; }
-function calcDiscount(promo, orderAmount) {
-  if (promo.type === 'percent') return Math.floor(orderAmount * (promo.value / 100));
-  return Math.min(orderAmount, promo.value);
-}
-
-async function validatePromoCore({ code, userNumber, orderAmount }) {
-  const now = new Date();
-  const promo = await PromoCode.findOne({ code, is_active: true });
-  if (!promo) return { ok: false, reason: 'NOT_FOUND_OR_INACTIVE' };
-  if (!withinDateRange(promo, now)) return { ok: false, reason: 'EXPIRED_OR_NOT_STARTED' };
-  if (promo.used_count >= promo.usage_limit) return { ok: false, reason: 'GLOBAL_LIMIT_REACHED' };
-
-  const usedByUser = await PromoRedemption.countDocuments({ promo_code: code, user_number: userNumber });
-  if (promo.per_user_limit && usedByUser >= promo.per_user_limit) return { ok: false, reason: 'PER_USER_LIMIT_REACHED' };
-
-  const discount = calcDiscount(promo, Number(orderAmount || 0));
-  return { ok: true, promo, discount };
-}
-
-// --------------------- PROMO Endpoints ---------------------
-// Create promo
-app.post('/api/promos', async (req, res) => {
-  try {
-    const promo = await PromoCode.create(req.body || {});
-    res.status(201).json({ ok: true, data: promo });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.message });
-  }
-});
-
-// List promos
-app.get('/api/promos', async (req, res) => {
-  try {
-    const { active } = req.query;
-    const filter = {};
-    if (active === 'true') filter.is_active = true;
-    const promos = await PromoCode.find(filter).sort({ createdAt: -1 });
-    res.json({ ok: true, data: promos });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Get one promo by code
-app.get('/api/promos/:code', async (req, res) => {
-  try {
-    const promo = await PromoCode.findOne({ code: req.params.code });
-    if (!promo) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-    res.json({ ok: true, data: promo });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Update promo
-app.patch('/api/promos/:code', async (req, res) => {
-  try {
-    const promo = await PromoCode.findOneAndUpdate(
-      { code: req.params.code },
-      { $set: req.body, $currentDate: { updatedAt: true } },
-      { new: true }
-    );
-    if (!promo) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-    res.json({ ok: true, data: promo });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.message });
-  }
-});
-
-// Deactivate
-app.post('/api/promos/:code/deactivate', async (req, res) => {
-  try {
-    const promo = await PromoCode.findOneAndUpdate(
-      { code: req.params.code },
-      { $set: { is_active: false } },
-      { new: true }
-    );
-    if (!promo) return res.status(404).json({ ok: false, error: 'NOT_FOUND' });
-    res.json({ ok: true, data: promo });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Validate (no write)
-app.post('/api/promos/:code/validate', async (req, res) => {
-  try {
-    const { userNumber, orderAmount } = req.body || {};
-    if (!userNumber) return res.status(400).json({ ok:false, message:'userNumber required' });
-    const result = await validatePromoCore({ code: req.params.code, userNumber, orderAmount });
-    if (!result.ok) return res.status(400).json(result);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Redeem (write minimal; small project: no transaction)
-app.post('/api/promos/:code/redeem', async (req, res) => {
-  try {
-    const { userNumber, orderAmount } = req.body || {};
-    if (!userNumber) return res.status(400).json({ ok:false, message:'userNumber required' });
-
-    // (optional) ensure user exists
-    const exists = await User.exists({ number: String(userNumber) });
-    if (!exists) return res.status(404).json({ ok:false, message:'User_not_found' });
-
-    const result = await validatePromoCore({ code: req.params.code, userNumber, orderAmount });
-    if (!result.ok) return res.status(400).json(result);
-
-    await PromoRedemption.create({ promo_code: req.params.code, user_number: userNumber });
-    await PromoCode.updateOne({ code: req.params.code }, { $inc: { used_count: 1 } });
-
-    res.json({ ok: true, discount: result.discount });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
 app.put('/api/user/:number/gmail', async (req, res) => {
   try {
     const number = String(req.params.number);
@@ -475,28 +371,23 @@ app.put('/api/user/:number/gmail', async (req, res) => {
 });
 
 // ===== Set consented =====
-// PUT /api/user/:number/consented/true
 app.put('/api/user/:number/consented/true', async (req, res) => {
   try {
     const number = String(req.params.number || '').trim();
     if (!number) return res.status(400).json({ ok: false, message: 'number (params) is required' });
 
-    // อัปเดตเฉพาะถ้ายังไม่เป็น true
     const updated = await User.findOneAndUpdate(
       { number, consented: { $ne: true } },
       { $set: { consented: true } },
       { new: true }
     );
 
-    // ไม่พบเลย?
     if (!updated) {
-      // เช็กว่ามี user ไหม แต่ consented เป็น true อยู่แล้วหรือไม่พบ user
       const exists = await User.findOne({ number }, { number: 1, consented: 1 }).lean();
       if (!exists) return res.status(404).json({ ok: false, message: 'User_not_found' });
       if (exists.consented === true) {
         return res.json({ ok: true, message: 'Already_true', data: { number: exists.number, consented: true } });
       }
-      // กรณีอื่น ๆ (เช่น ฟิลด์หายาก) ให้ตอบ not modified
       return res.status(304).json({ ok: false, message: 'Not_modified' });
     }
 
@@ -507,10 +398,10 @@ app.put('/api/user/:number/consented/true', async (req, res) => {
   }
 });
 
-
-// Health
+// Health (อันที่สอง) — คงไว้ตามเดิม
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.head('/api/health', (_req, res) => res.status(200).end());
+
 // ====== Start Server ======
 app.listen(port, () => console.log(`🚀 Server running on http://localhost:${port}`));
