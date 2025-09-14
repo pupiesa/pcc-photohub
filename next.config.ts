@@ -1,13 +1,12 @@
 // next.config.ts
 import type { NextConfig } from "next";
 
-// ----- Read ENV (for Nextcloud image domains) -----
+// ----- Read ENV (for Nextcloud image domains on <Image>) -----
 const PROTO_ENV = process.env.NEXTCLOUD_SERVER_PROTOCOL;
 const PROTO: "http" | "https" = PROTO_ENV === "https" ? "https" : "http";
 const LINK = process.env.NEXTCLOUD_SERVER_LINK || "";
 const PORT = process.env.NEXTCLOUD_SERVER_PORT || "";
 
-// Normalize hostname from LINK (accept URL or raw hostname)
 function toHostname(raw: string): string {
   try {
     if (!raw) return "";
@@ -19,32 +18,38 @@ function toHostname(raw: string): string {
 }
 const HOST = toHostname(LINK) || "localhost";
 
-// ----- Remote patterns (no undefined on `port`) -----
+//ใช้กับ <Image> (โหลดรูปจากโดเมน Nextcloud โดยตรง เมื่อ fallback)
 const remotePatterns: NonNullable<NextConfig["images"]>["remotePatterns"] = [
-  {
-    protocol: PROTO,
-    hostname: HOST,
-    pathname: "/**",
-    ...(PORT ? { port: PORT } : {}),
-  },
+  { protocol: PROTO, hostname: HOST, pathname: "/**", ...(PORT ? { port: PORT } : {}) },
 ];
 
+// ปลายทาง “จริง” ของ backend (origin) — ใช้กับ rewrites เท่านั้น
+const MONGO_API_ORIGIN   = process.env.MONGO_API_ORIGIN   || "http://localhost:2000";
+const NEXTCLOUD_API_ORIGIN = process.env.NEXTCLOUD_API_ORIGIN || "http://localhost:1000";
+const SMTP_API_ORIGIN    = process.env.SMTP_API_ORIGIN    || "http://localhost:4000";
+
+//path prefix ฝั่งหน้าเว็บ (public base สำหรับ fetch ฝั่ง client)
+const NEXT_PUBLIC_MONGO_API = process.env.NEXT_PUBLIC_MONGO_API || "/mapi";
+const NEXT_PUBLIC_NC_API    = process.env.NEXT_PUBLIC_NC_API    || "/ncapi";
+const NEXT_PUBLIC_SMTP_API  = process.env.NEXT_PUBLIC_SMTP_API  || "/smtpapi";
+const NEXT_PUBLIC_NC_BASE   = process.env.NEXT_PUBLIC_NC_BASE   || "/ncapi"; // ใช้ใน page.js
+
 const nextConfig: NextConfig = {
-  // Proxy ไป backend ต่าง ๆ ด้วย path prefix
   async rewrites() {
     return [
-      { source: "/mapi/:path*",  destination: process.env.NEXT_PUBLIC_MONGO_BASE  || "http://localhost:2000/:path*" },
-      { source: "/ncapi/:path*", destination: process.env.NEXT_PUBLIC_NC_BASE     || "http://localhost:1000/:path*" },
-      { source: "/smtpapi/:path*", destination: process.env.NEXT_PUBLIC_SMTP_BASE || "http://localhost:4000/:path*" },
+      //ปลายทางต้องเป็น “origin” ของ backend เท่านั้น อย่าใช้ NEXT_PUBLIC_*
+      { source: "/mapi/:path*",   destination: `${MONGO_API_ORIGIN}/:path*` },
+      { source: "/ncapi/:path*",  destination: `${NEXTCLOUD_API_ORIGIN}/:path*` },
+      { source: "/smtpapi/:path*",destination: `${SMTP_API_ORIGIN}/:path*` },
     ];
   },
 
-  // ส่งค่า env ไปฝั่ง client (build-time) — ใช้ค่า .env ถ้ามี, ไม่งั้น fallback เป็น proxy path
+  // ส่งค่า env ไปฝั่ง client (ใช้ path prefix เท่านั้น)
   env: {
-    NEXT_PUBLIC_MONGO_API: process.env.NEXT_PUBLIC_MONGO_API || "/mapi",
-    NEXT_PUBLIC_NC_API:    process.env.NEXT_PUBLIC_NC_API    || "/ncapi",
-    NEXT_PUBLIC_SMTP_API:  process.env.NEXT_PUBLIC_SMTP_API  || "/smtpapi",
-    NEXT_PUBLIC_NC_BASE:   process.env.NEXT_PUBLIC_NC_BASE   || "/ncapi",
+    NEXT_PUBLIC_MONGO_API,
+    NEXT_PUBLIC_NC_API,
+    NEXT_PUBLIC_SMTP_API,
+    NEXT_PUBLIC_NC_BASE,
   },
 
   images: { remotePatterns },
