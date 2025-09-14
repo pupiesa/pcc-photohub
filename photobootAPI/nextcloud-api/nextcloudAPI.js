@@ -93,7 +93,7 @@ async function getExistingPublicShare(cleanPath) {
   return list.find(s => String(s.share_type) === '3' && s.path === cleanPath) || null;
 }
 
-// ✅ Updated: รองรับการ "ลบรหัส" (ส่ง newPassword = ""), และ "ลบวันหมดอายุ" (expiration = ""/null)
+//Updated: รองรับการ "ลบรหัส" (ส่ง newPassword = ""), และ "ลบวันหมดอายุ" (expiration = ""/null)
 async function maybeUpdateShare(shareId, { note, linkPassword, expiration, permissions, publicUpload }) {
   const params = new URLSearchParams();
 
@@ -268,6 +268,127 @@ app.post('/api/nextcloud/upload-and-share', async (req, res) => {
   }
 });
 
+/**Share-only: สร้าง/รีใช้ลิงก์สาธารณะ (ไม่อัปโหลดไฟล์) และ ensure โฟลเดอร์มีอยู่จริง */
+app.post('/api/nextcloud/share-only', async (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      return res.status(400).json({ ok:false, message:'Content-Type must be application/json' });
+    }
+
+    const {
+      folderName,
+      sharePath,                 // ถ้ามี จะใช้แทน folderName
+      permissions = 1,           // read-only
+      publicUpload,
+      note,
+      linkPassword,
+      expiration,                // YYYY-MM-DD
+      forceNew
+    } = req.body || {};
+
+    if (expiration && isNaN(Date.parse(expiration))) {
+      return res.status(400).json({ ok:false, message:'Invalid expiration date format' });
+    }
+
+    // สร้าง path สำหรับแชร์
+    let cleanPath = null;
+    if (typeof sharePath === 'string' && sharePath.trim()) {
+      cleanPath = sharePath.trim().startsWith('/') ? sharePath.trim() : '/' + sharePath.trim();
+    } else if (typeof folderName === 'string' && folderName.trim()) {
+      cleanPath = '/' + folderName.trim().replace(/^\/+/, '');
+    }
+    if (!cleanPath) {
+      return res.status(400).json({ ok:false, message:'Missing folderName or sharePath' });
+    }
+
+    //Ensure โฟลเดอร์มีอยู่ใน WebDAV (เช่น /files/<username>/<cleanPath>)
+    const davRel = cleanPath.replace(/^\/+/, '');
+    const davFolderPath = `files/${username}/${davRel}`;
+    try {
+      await webdavClient.createDirectory(davFolderPath);
+    } catch (err) {
+      // 405 = already exists
+      if (err?.response?.status !== 405) throw err;
+    }
+
+    // ===== Reuse link ถ้าไม่ forceNew =====
+    let existed = false;
+    let shareId, shareLink;
+
+    if (!forceNew) {
+      const current = await getExistingPublicShare(cleanPath);
+      if (current) {
+        existed = true;
+        shareId = current.id;
+        shareLink = current.url;
+        try {
+          await maybeUpdateShare(shareId, { note, linkPassword, expiration, permissions, publicUpload });
+        } catch (e) {
+          console.warn('share-only: update existing share failed:', e?.response?.data || e?.message);
+        }
+      }
+    }
+
+    // ===== Create ใหม่ถ้าไม่มีของเดิม หรือ forceNew =====
+    if (!existed) {
+      const form = new URLSearchParams();
+      form.set('path', cleanPath);
+      form.set('shareType', '3'); // public link
+      form.set('permissions', String(permissions));
+      if (typeof linkPassword !== 'undefined') form.set('password', linkPassword || '');
+      if (expiration) {
+        const iso = new Date(expiration).toISOString().split('T')[0];
+        form.set('expireDate', iso);
+      }
+      if (typeof publicUpload !== 'undefined') form.set('publicUpload', publicUpload ? 'true' : 'false');
+
+      const createResp = await axios.post(`${ocsApiUrl}/shares?format=json`, form.toString(), {
+        auth: { username, password: ncPassword },
+        headers: {
+          'OCS-APIRequest': 'true',
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        httpsAgent
+      });
+
+      const meta = createResp.data?.ocs?.meta;
+      const data = createResp.data?.ocs?.data;
+      if (!meta || ![100,200].includes(meta.statuscode)) {
+        return res.status(500).json({ ok:false, message: meta?.message || 'OCS create error', raw: createResp.data });
+      }
+
+      shareId = data?.id;
+      shareLink = data?.url;
+
+      if (typeof note !== 'undefined' && shareId) {
+        try { await maybeUpdateShare(shareId, { note }); } catch (e) {
+          console.warn('share-only: set note failed:', e?.response?.data || e?.message);
+        }
+      }
+    }
+
+    return res.json({
+      ok: true,
+      message: existed ? 'Reused existing public link' : 'Created new public link',
+      share: {
+        id: shareId,
+        url: shareLink,
+        path: cleanPath,
+        existed,
+        protected: Boolean(linkPassword),
+        expiration: expiration || null,
+        permissions,
+        publicUpload: Boolean(publicUpload),
+      }
+    });
+
+  } catch (error) {
+    console.error('Share-only error:', { message: error.message, status: error.response?.status, data: error.response?.data });
+    return res.status(error?.response?.status || 500).json({ ok:false, message:'SHARE_ONLY_FAILED', raw: error?.response?.data });
+  }
+});
+
 // (Optional) upload only
 app.post('/api/nextcloud/upload', async (req, res) => {
   try {
@@ -429,7 +550,7 @@ app.post('/api/nextcloud/upload-bytes', uploadImagesOnly.single('file'), async (
   }
 });
 
-/** ✅ NEW: เปลี่ยน/ลบรหัสผ่านของ public share ของโฟลเดอร์ (ใช้ folderName = เบอร์ผู้ใช้) */
+/**NEW: เปลี่ยน/ลบรหัสผ่านของ public share ของโฟลเดอร์ (ใช้ folderName = เบอร์ผู้ใช้) */
 app.post('/api/nextcloud/change-share-password', async (req, res) => {
   try {
     if (!req.is('application/json')) {

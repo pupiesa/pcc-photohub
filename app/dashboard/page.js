@@ -1,54 +1,46 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import QRCode from "react-qr-code";
+import { toast } from "sonner";
 import { client } from "@/lib/photoboothClient";
-
+import { Loader } from "@/components/ui/shadcn-io/ai/loader";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
+  Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradient";
 
+/* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
-const NC_BASE = process.env.NEXT_PUBLIC_NC_BASE || "/ncapi"; // rewrite ไป nextcloud-api
+const NC_BASE = process.env.NEXT_PUBLIC_NC_BASE || "/ncapi";
+const OTP_TOTAL_SECS = 120;
 
 const buildProxyPreview = (relPath) =>
-  `${(NC_BASE || "").replace(/\/$/, "")}/api/nextcloud/preview?path=${encodeURIComponent(
-    relPath
-  )}`;
+  `${(NC_BASE || "").replace(/\/$/, "")}/api/nextcloud/preview?path=${encodeURIComponent(relPath)}`;
 
 function deriveRelPath(it) {
-  if (it && it.path) return String(it.path).replace(/^\/+/, "");
-
+  if (it?.path) return String(it.path).replace(/^\/+/, "");
   try {
-    if (it && it.previewUrl) {
+    if (it?.previewUrl) {
       const u = new URL(it.previewUrl);
       const f = u.searchParams.get("file");
       if (f) return decodeURIComponent(f).replace(/^\/+/, "");
     }
   } catch {}
-
   try {
-    if (it && it.downloadUrl) {
+    if (it?.downloadUrl) {
       const u = new URL(it.downloadUrl);
       const p = u.searchParams.get("path");
       const files = u.searchParams.get("files");
@@ -58,14 +50,12 @@ function deriveRelPath(it) {
       }
     }
   } catch {}
-
-  return String((it && it.name) || "").replace(/^\/+/, "");
+  return String(it?.name || "").replace(/^\/+/, "");
 }
 
 function ProxyPreview({ item }) {
   const rel = deriveRelPath(item);
   if (!rel) return <div className="w-full h-32 bg-gray-200/20 rounded" />;
-
   return (
     <div className="relative w-full h-32">
       <Image
@@ -80,72 +70,150 @@ function ProxyPreview({ item }) {
   );
 }
 
+/* ---------- Inline Soft Keyboards ---------- */
+function InlineOtpKeypad({ visible, setValue, onDone }) {
+  if (!visible) return null;
+  const keys = ["1","2","3","4","5","6","7","8","9","0"];
+  const press = (k) => {
+    if (k === "back") setValue((v) => v.slice(0, -1));
+    else if (k === "clear") setValue("");
+    else if (k === "paste") {
+      navigator.clipboard.readText().then((t) => {
+        setValue(String(t).replace(/\D/g, "").slice(0, 6));
+      }).catch(() => {});
+    } else setValue((v) => (v + k).replace(/\D/g, "").slice(0, 6));
+  };
+  return (
+    <div className="mt-3 rounded-xl border p-3 bg-muted/30">
+      <div className="grid grid-cols-3 gap-2">
+        {keys.slice(0, 9).map((k) => (
+          <Button key={k} variant="secondary" onClick={() => press(k)}>{k}</Button>
+        ))}
+        <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
+        <Button variant="secondary" onClick={() => press("0")}>0</Button>
+        <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
+      </div>
+      <div className="flex gap-2 pt-2">
+        <Button variant="outline" onClick={() => press("paste")}>วาง</Button>
+        <Button onClick={onDone}>เสร็จสิ้น</Button>
+      </div>
+    </div>
+  );
+}
+
+function InlineEmailKeyboard({ visible, setValue, onDone }) {
+  if (!visible) return null;
+  const rows = [
+    ["q","w","e","r","t","y","u","i","o","p"],
+    ["a","s","d","f","g","h","j","k","l","@"],
+    ["z","x","c","v","b","n","m",".","_","-"],
+  ];
+  const press = (k) => {
+    if (k === "back") setValue((v) => v.slice(0, -1));
+    else if (k === "clear") setValue("");
+    else if (k === "paste") {
+      navigator.clipboard.readText().then((t) => setValue(String(t))).catch(()=>{});
+    } else setValue((v) => (v + k).slice(0, 254));
+  };
+  return (
+    <div className="mt-3 rounded-xl border p-3 bg-muted/30">
+      <div className="space-y-2">
+        {rows.map((row, idx) => (
+          <div key={idx} className="flex gap-1 justify-center">
+            {row.map((k) => (
+              <Button key={k} variant="secondary" className="min-w-9" onClick={() => press(k)}>
+                {k}
+              </Button>
+            ))}
+          </div>
+        ))}
+        <div className="flex gap-1 justify-center">
+          <Button variant="secondary" onClick={() => press(".com")}>.com</Button>
+          <Button variant="secondary" onClick={() => press(".co.th")}>.co.th</Button>
+          <Button variant="outline" onClick={() => press("paste")}>วาง</Button>
+          <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
+          <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={onDone}>เสร็จสิ้น</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Page ---------- */
 export default function CustomerDashboard() {
   const router = useRouter();
+
   const [phone, setPhone] = useState(null);
   const [gallery, setGallery] = useState([]);
+  const [summary, setSummary] = useState({ count: 0, link: null, hasEmail: false, displayName: null });
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState({ count: 0, link: null });
   const [error, setError] = useState(null);
 
-  // --- Dialog state for Gmail + OTP ---
+  // email/otp dialog
   const [openEmailFlow, setOpenEmailFlow] = useState(false);
   const [step, setStep] = useState("email"); // "email" | "otp"
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
-  const [otp, setOtp] = useState("");
   const [sending, setSending] = useState(false);
   const [flowError, setFlowError] = useState(null);
-  const otpInputRef = useRef(null);
+
+  // otp
+  const [otp, setOtp] = useState("");
+  const [otpSecsLeft, setOtpSecsLeft] = useState(OTP_TOTAL_SECS);
+  const [canResend, setCanResend] = useState(false);
+  const [otpTimerKey, setOtpTimerKey] = useState(0);
+
+  // soft keyboard visibility
+  const [showEmailKb, setShowEmailKb] = useState(false);
+  const [showOtpKb, setShowOtpKb] = useState(false);
+
+  // ตัวกั้นสำหรับ Email keyboard (กัน onFocus เปิดซ้ำหลังกดเสร็จสิ้น)
+  const emailKbSuppressRef = useRef(false);
+
+  const emailInputRef = useRef(null);
+  const otpFirstSlotRef = useRef(null);
+
+  const safeSelectAll = (el) => {
+    try { if (el?.setSelectionRange) el.setSelectionRange(0, el.value?.length ?? 0); } catch {}
+  };
 
   useEffect(() => {
-    const p =
-      typeof window !== "undefined"
-        ? localStorage.getItem("pcc_user_phone")
-        : null;
-    if (!p) {
-      router.replace("/booth");
-      return;
-    }
+    const p = typeof window !== "undefined" ? localStorage.getItem("pcc_user_phone") : null;
+    if (!p) { router.replace("/booth"); return; }
     setPhone(p);
   }, [router]);
 
   const load = async (p) => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const u = await client.getUserByNumber(p);
-      const link = (u && u.data && u.data.nextcloud_link) || null;
-      const count =
-        (u && u.file_summary && u.file_summary.count) != null
-          ? u.file_summary.count
-          : Array.isArray(u && u.data && u.data.file_address)
-          ? u.data.file_address.length
-          : 0;
-      setSummary({ count, link });
+      const data = u?.data || {};
+      const link = data.nextcloud_link || null;
+      const hasEmail = Boolean(data.gmail) || Boolean(data.hasEmail);
+      const displayName = data.name || null;
+      const count = u?.file_summary?.count != null
+        ? u.file_summary.count
+        : (Array.isArray(data.file_address) ? data.file_address.length : 0);
+      setSummary({ count, link, hasEmail, displayName });
 
       const g = await client.getUserGallery(p);
-      const onlyImages = ((g && g.files) || []).filter((it) =>
-        IMAGE_RE.test((it && it.name) || "")
-      );
+      const onlyImages = (g?.files || []).filter((it) => IMAGE_RE.test(String(it?.name || "")));
       setGallery(onlyImages);
     } catch (e) {
       console.error("dashboard load error:", e);
-      setError("Failed to load your gallery. Please try again.");
+      setError(e?.message || "Failed to load your gallery. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (phone) load(phone);
-  }, [phone]);
+  useEffect(() => { if (phone) load(phone); }, [phone]);
 
   const refresh = () => phone && load(phone);
-  const logout = () => {
-    localStorage.removeItem("pcc_user_phone");
-    router.push("/booth");
-  };
+  const logout = () => { localStorage.removeItem("pcc_user_phone"); localStorage.removeItem("pcc_user_pin"); router.push("/booth"); };
   const goBack = () => router.push("/booth");
 
   const emailValid = useMemo(() => {
@@ -155,69 +223,153 @@ export default function CustomerDashboard() {
 
   const otpValid = useMemo(() => /^\d{6}$/.test(otp.trim()), [otp]);
 
+  // focus + auto popup soft keyboards
+  useEffect(() => {
+    if (!openEmailFlow) return;
+    const t = setTimeout(() => {
+      if (step === "email" && emailInputRef.current) {
+        emailInputRef.current.focus({ preventScroll: true });
+        safeSelectAll(emailInputRef.current);
+        emailInputRef.current.scrollIntoView({ block: "center" });
+        setShowEmailKb(true);
+      }
+      if (step === "otp" && otpFirstSlotRef.current) {
+        otpFirstSlotRef.current.focus({ preventScroll: true });
+        setShowOtpKb(true);
+      }
+    }, 50);
+    return () => clearTimeout(t);
+  }, [openEmailFlow, step, email.length]);
+
+  // countdown
+  useEffect(() => {
+    if (step !== "otp") return;
+    setOtpSecsLeft(OTP_TOTAL_SECS);
+    setCanResend(false);
+    let alive = true;
+    const id = setInterval(() => {
+      if (!alive) return;
+      setOtpSecsLeft((s) => {
+        if (s <= 1) { clearInterval(id); setCanResend(true); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, [step, otpTimerKey]);
+
   const handleOpenEmailFlow = () => {
-    setFlowError(null);
-    setEmail("");
-    setConsent(false);
-    setOtp("");
-    setStep("email");
-    setOpenEmailFlow(true);
+    setFlowError(null); setEmail(""); setConsent(false); setOtp("");
+    setStep("email"); setOpenEmailFlow(true);
+    emailKbSuppressRef.current = false;
+  };
+
+  const isDuplicateEmailError = (e) => {
+    const msg = String(e?.message || "").toLowerCase();
+    const code = String(e?.payload?.code || "").toLowerCase();
+    return (
+      e?.status === 409 ||
+      msg.includes("duplicate") || msg.includes("already") ||
+      msg.includes("exists") || msg.includes("in use") ||
+      code.includes("duplicate") || code.includes("email_exists") || code.includes("email_in_use")
+    );
   };
 
   const handleSendOtp = async () => {
-    setFlowError(null);
-    setSending(true);
+    if (!phone) return;
+    setFlowError(null); setSending(true);
     try {
-      // TODO: เรียก backend จริงของคุณ เช่น:
-      // await client.sendOtp({ phone, email })
-      await new Promise((r) => setTimeout(r, 500)); // mock
+      await client.requestEmailOTP({ number: phone, email: email.trim() });
       setStep("otp");
-      setTimeout(() => {
-        if (otpInputRef.current) otpInputRef.current.focus();
-      }, 50);
+      setOtpTimerKey((k) => k + 1);
+      toast.success("ส่งรหัส OTP แล้ว ตรวจอีเมลของคุณ");
+      setShowOtpKb(true);
+      setShowEmailKb(false);
     } catch (e) {
-      setFlowError((e && e.message) || "ส่งรหัสไม่สำเร็จ กรุณาลองใหม่");
-    } finally {
-      setSending(false);
-    }
+      console.error(e);
+      if (isDuplicateEmailError(e)) {
+        toast.error("อีเมลนี้ถูกใช้แล้ว โปรดใช้อีเมลอื่น", { duration: 5000 });
+        setStep("email");
+        setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
+        return;
+      }
+      setFlowError(e?.message || "ส่งรหัสไม่สำเร็จ กรุณาลองใหม่");
+      toast.error(e?.message || "ส่งรหัสไม่สำเร็จ");
+    } finally { setSending(false); }
+  };
+
+  const handleResend = async () => {
+    if (!phone || !canResend) return;
+    setFlowError(null); setSending(true);
+    try {
+      await client.requestEmailOTP({ number: phone, email: email.trim() });
+      setOtp(""); setOtpTimerKey((k) => k + 1);
+      setTimeout(() => otpFirstSlotRef.current?.focus({ preventScroll: true }), 30);
+      toast.success("ส่งรหัสใหม่แล้ว");
+      setShowOtpKb(true);
+    } catch (e) {
+      setFlowError(e?.message || "ส่งรหัสใหม่ไม่สำเร็จ");
+      toast.error(e?.message || "ส่งรหัสใหม่ไม่สำเร็จ");
+    } finally { setSending(false); }
+  };
+
+  const createNextcloudLink = async () => {
+    if (!phone) return null;
+    const folderName = (summary.displayName?.trim()) || phone;
+    const linkPassword = (summary.displayName?.trim() || String(phone)).replace(/\s+/g, "");
+    const res = await client.shareOnly({
+      folderName, permissions: 1, publicUpload: false,
+      note: `Share for ${phone}`, linkPassword, expiration: null, forceNew: true,
+    });
+    const link = res?.share?.url || res?.url || res?.data?.url || res?.publicUrl || res?.link || null;
+    if (!link) throw new Error("สร้างลิงก์สำเร็จ แต่ไม่พบ URL สำหรับใช้งาน");
+    await client.setNextcloudLink(phone, link);
+    return link;
   };
 
   const handleVerifyOtp = async () => {
-    setFlowError(null);
-    setSending(true);
+    if (!phone) return;
+    setFlowError(null); setSending(true);
     try {
-      // TODO: verify OTP จริง:
-      // const { link } = await client.verifyOtp({ phone, email, otp })
-      await new Promise((r) => setTimeout(r, 500)); // mock
-
-      const finalLink =
-        summary.link ||
-        `https://example.com/share/${encodeURIComponent(String(phone))}`;
-
-      setSummary((s) => ({ ...s, link: finalLink }));
+      await client.confirmEmailOTP({ number: phone, email: email.trim(), otp: otp.trim() });
+      await client.setGmail(phone, email.trim());
+      await client.setConsentedTrue(phone);
+      if (!summary.link) await createNextcloudLink();
+      await load(phone);
       setOpenEmailFlow(false);
+      toast.success("ยืนยันอีเมลสำเร็จ");
     } catch (e) {
-      setFlowError((e && e.message) || "ยืนยันรหัสไม่สำเร็จ กรุณาลองใหม่");
-    } finally {
-      setSending(false);
-    }
+      console.error(e);
+      if (isDuplicateEmailError(e)) {
+        toast.error("อีเมลนี้ถูกใช้แล้ว โปรดใช้อีเมลอื่น", { duration: 5000 });
+        setTimeout(() => {
+          setStep("email"); setOtp("");
+          setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
+          setShowEmailKb(true); setShowOtpKb(false);
+        }, 500);
+        return;
+      }
+      setFlowError(e?.message || "ยืนยันรหัสไม่สำเร็จ กรุณาลองใหม่");
+      toast.error(e?.message || "ยืนยันรหัสไม่สำเร็จ");
+    } finally { setSending(false); }
   };
+
+  const otpProgress = useMemo(() => {
+    const p = Math.max(0, Math.min(100, (otpSecsLeft / OTP_TOTAL_SECS) * 100));
+    return p;
+  }, [otpSecsLeft]);
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center py-8">
       <div className="w-full max-w-5xl px-4 flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold tracking-tight">My Gallery</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={goBack}>
-            Back
-          </Button>
-          <Button variant="outline" onClick={refresh}>
-            Refresh
+          <Button variant="outline" onClick={goBack}>Back</Button>
+          <Button variant="outline" onClick={refresh} disabled={loading}>
+            {loading ? (<><Loader size={16} className="mr-2" />Loading…</>) : ("Refresh")}
           </Button>
           <Button onClick={logout}>Logout</Button>
         </div>
       </div>
-
 
       <div className="w-full max-w-5xl px-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* PHOTOS */}
@@ -225,8 +377,7 @@ export default function CustomerDashboard() {
           <CardHeader>
             <CardTitle>Photos</CardTitle>
             <CardDescription>
-              {phone ? `Phone: ${phone}` : "Loading…"}
-              {summary.count ? ` • Total: ${summary.count}` : ""}
+              {phone ? `Phone: ${phone}` : "Loading…"} {summary.count ? `• Total: ${summary.count}` : ""}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -239,15 +390,9 @@ export default function CustomerDashboard() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {gallery.map((it, idx) => (
-                  <div
-                    key={`${(it.name || it.path || "item")}-${idx}`}
-                    className="group rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
-                    title={it.name}
-                  >
+                  <div key={`${(it.name || it.path || "item")}-${idx}`} className="group rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700" title={it.name}>
                     <ProxyPreview item={it} />
-                    <div className="px-2 py-1 text-xs truncate text-gray-600 dark:text-gray-300">
-                      {it.name}
-                    </div>
+                    <div className="px-2 py-1 text-xs truncate text-gray-600 dark:text-gray-300">{it.name}</div>
                   </div>
                 ))}
               </div>
@@ -255,6 +400,7 @@ export default function CustomerDashboard() {
           </CardContent>
         </Card>
 
+        {/* SUMMARY + QR */}
         <Card className="order-1 md:order-2">
           <CardHeader>
             <CardTitle>Customer Summary</CardTitle>
@@ -269,27 +415,25 @@ export default function CustomerDashboard() {
               <div className="text-gray-500 dark:text-gray-400">Total Photos</div>
               <div className="font-medium">{summary.count}</div>
             </div>
-
             <div className="text-sm">
-              <div className="text-gray-500 dark:text-gray-400 mb-2">
-                Shared Link (QR)
-              </div>
-
-              {summary.link ? (
+              <div className="text-gray-500 dark:text-gray-400 mb-2">Shared Link (QR)</div>
+              {summary.link && summary.hasEmail ? (
                 <div className="flex flex-col items-center gap-3">
                   <BackgroundGradient className="rounded-xl p-3">
                     <div className="bg-white p-3 rounded-lg">
-                      <div className="text-xs font-semibold text-gray-800 text-center mb-2">
-                        ProjectPhoto_PCC
-                      </div>
+                      <div className="text-xs font-semibold text-gray-800 text-center mb-2">ProjectPhoto_PCC</div>
                       <QRCode value={summary.link} size={172} />
                     </div>
                   </BackgroundGradient>
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="font-medium">ยังไม่ได้สร้างลิงก์</div>
-                  <Button onClick={handleOpenEmailFlow}>ใส่ Gmail</Button>
+                <div className="flex flex-col items-center gap-3 text-center">
+                  {!summary.link ? (
+                    <div className="font-medium">ยังไม่ได้สร้างลิงก์</div>
+                  ) : (
+                    <div className="font-medium">มีลิงก์อยู่แล้ว แต่ยังไม่ได้ยืนยันอีเมล<br />กรุณายืนยันอีเมลก่อนจึงจะแสดง QR Code</div>
+                  )}
+                  <Button onClick={handleOpenEmailFlow}>ใส่/ยืนยันอีเมล</Button>
                 </div>
               )}
             </div>
@@ -298,85 +442,100 @@ export default function CustomerDashboard() {
       </div>
 
       {/* Email + OTP Flow */}
-      <Dialog open={openEmailFlow} onOpenChange={setOpenEmailFlow}>
+      <Dialog
+        open={openEmailFlow}
+        onOpenChange={(open) => {
+          setOpenEmailFlow(open);
+          if (!open) {
+            setStep("email"); setOtp(""); setFlowError(null);
+            setSending(false); setCanResend(false);
+            setShowEmailKb(false); setShowOtpKb(false);
+            emailKbSuppressRef.current = false;
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-lg">
           {step === "email" ? (
             <>
               <DialogHeader>
                 <DialogTitle>ยืนยันอีเมล</DialogTitle>
-                <DialogDescription>
-                  กรอกอีเมลเพื่อรับรหัส OTP 6 หลัก
-                </DialogDescription>
+                <DialogDescription>กรอกอีเมลเพื่อรับรหัส OTP 6 หลัก</DialogDescription>
               </DialogHeader>
 
               <div className="grid gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="email">อีเมล</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="email">อีเมล</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          emailInputRef.current?.focus({ preventScroll: true });
+                          emailInputRef.current?.scrollIntoView({ block: "center" });
+                          setShowEmailKb(true);
+                        }}
+                      >โฟกัส</Button>
+                      <Button variant="outline" size="sm" onClick={() => setShowEmailKb((v) => !v)}>
+                        {showEmailKb ? "ซ่อนแป้นพิมพ์" : "แสดงแป้นพิมพ์"}
+                      </Button>
+                    </div>
+                  </div>
+
                   <Input
                     id="email"
-                    type="email"
-                    inputMode="email"
+                    ref={emailInputRef}
+                    type="text"           // ใช้ text เพื่อ setSelectionRange ได้
+                    inputMode="email"     // ช่วยคีย์บอร์ดมือถือโทนอีเมล
+                    autoComplete="email"
+                    enterKeyHint="go"
                     placeholder="you@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    onFocus={(e) => {
+                      e.target.scrollIntoView({ block: "center" });
+                      if (!emailKbSuppressRef.current) setShowEmailKb(true);
+                    }}
                   />
                   {!emailValid && email.length > 0 && (
-                    <p className="text-xs text-red-600">
-                      รูปแบบอีเมลไม่ถูกต้อง
-                    </p>
+                    <p className="text-xs text-red-600">รูปแบบอีเมลไม่ถูกต้อง</p>
                   )}
+
+                  {/* INLINE EMAIL KEYBOARD */}
+                  <InlineEmailKeyboard
+                    visible={showEmailKb}
+                    setValue={setEmail}
+                    onDone={() => {
+                      // ซ่อน + กัน onFocus เปิดซ้ำชั่วคราว
+                      emailKbSuppressRef.current = true;
+                      setShowEmailKb(false);
+                      setTimeout(() => { emailKbSuppressRef.current = false; }, 400);
+                      // ไม่ refocus input เพื่อไม่ให้เปิดซ้ำ
+                    }}
+                  />
                 </div>
 
                 <div className="grid gap-2">
                   <Label>เงื่อนไขการใช้งาน</Label>
                   <ScrollArea className="h-40 rounded-md border p-3 text-sm leading-6">
-                    <p>
-                      • ระบบจะส่งรหัส OTP ไปยังอีเมลของคุณเพื่อยืนยันตัวตน
-                      การใช้งานนี้ถือว่าคุณยินยอมให้เราประมวลผลอีเมลเพื่อการส่งรหัส
-                      และเชื่อมโยงกับเบอร์โทรศัพท์ที่ใช้เข้าสู่ระบบ…
-                    </p>
-                    <p className="mt-2">
-                      • ลิงก์แชร์รูปภาพจะถูกสร้างจากบัญชี Nextcloud
-                      และอาจมีวันหมดอายุหรือสิทธิ์การเข้าถึงตามที่ผู้ดูแลกำหนด…
-                    </p>
-                    <p className="mt-2">
-                      • โปรดเก็บรักษารหัส OTP และลิงก์แชร์เป็นความลับ
-                      เพื่อความปลอดภัยของข้อมูลของคุณ…
-                    </p>
-                    <p className="mt-2">
-                      • รายละเอียดฉบับเต็มโปรดดูนโยบายความเป็นส่วนตัวของเรา…
-                    </p>
+                    <p>• ระบบจะส่งรหัส OTP ไปยังอีเมลของคุณเพื่อยืนยันตัวตน…</p>
+                    <p className="mt-2">• ลิงก์แชร์รูปภาพจะถูกสร้างจากบัญชี Nextcloud…</p>
+                    <p className="mt-2">• โปรดเก็บรักษารหัส OTP และลิงก์แชร์เป็นความลับ…</p>
+                    <p className="mt-2">• รายละเอียดฉบับเต็มโปรดดูนโยบายความเป็นส่วนตัวของเรา…</p>
                   </ScrollArea>
-
                   <div className="flex items-start gap-2 pt-2">
-                    <Checkbox
-                      id="consent"
-                      checked={consent}
-                      onCheckedChange={(v) => setConsent(Boolean(v))}
-                    />
-                    <Label htmlFor="consent" className="text-sm leading-6">
-                      ฉันได้อ่านและยินยอมตามเงื่อนไขการใช้งาน
-                    </Label>
+                    <Checkbox id="consent" checked={consent} onCheckedChange={(v) => setConsent(Boolean(v))} />
+                    <Label htmlFor="consent" className="text-sm leading-6">ฉันได้อ่านและยินยอมตามเงื่อนไขการใช้งาน</Label>
                   </div>
                 </div>
 
-                {flowError && (
-                  <div className="text-sm text-red-600">{flowError}</div>
-                )}
+                {flowError && <div className="text-sm text-red-600">{flowError}</div>}
               </div>
 
               <DialogFooter className="mt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setOpenEmailFlow(false)}
-                >
-                  ยกเลิก
-                </Button>
-                <Button
-                  onClick={handleSendOtp}
-                  disabled={!emailValid || !consent || sending}
-                >
-                  {sending ? "กำลังส่ง…" : "ถัดไป"}
+                <Button variant="outline" onClick={() => setOpenEmailFlow(false)}>ยกเลิก</Button>
+                <Button onClick={handleSendOtp} disabled={!emailValid || !consent || sending}>
+                  {sending ? (<><Loader size={16} className="mr-2" />กำลังส่ง…</>) : ("ถัดไป")}
                 </Button>
               </DialogFooter>
             </>
@@ -384,51 +543,85 @@ export default function CustomerDashboard() {
             <>
               <DialogHeader>
                 <DialogTitle>ใส่รหัส OTP</DialogTitle>
-                <DialogDescription>
-                  เราส่งรหัส 6 หลักไปที่ <span className="font-medium">{email}</span>
-                </DialogDescription>
+                <DialogDescription>เราส่งรหัส 6 หลักไปที่ <span className="font-medium">{email}</span></DialogDescription>
               </DialogHeader>
 
               <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="otp">รหัส OTP 6 หลัก</Label>
-                  <Input
-                    id="otp"
-                    ref={otpInputRef}
-                    inputMode="numeric"
-                    pattern="\\d{6}"
-                    maxLength={6}
-                    placeholder="______"
-                    value={otp}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/\D/g, "").slice(0, 6);
-                      setOtp(v);
-                    }}
-                    className="tracking-widest text-center text-lg"
-                  />
-                  {!otpValid && otp.length > 0 && (
-                    <p className="text-xs text-red-600">ต้องเป็นตัวเลข 6 หลัก</p>
-                  )}
+                <div className="space-y-1">
+                  <Progress value={otpProgress} />
+                  <div className="text-xs text-gray-500">เวลาที่เหลือ: {otpSecsLeft}s</div>
                 </div>
 
-                {flowError && (
-                  <div className="text-sm text-red-600">{flowError}</div>
-                )}
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="otp">รหัส OTP 6 หลัก</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline" size="sm"
+                        onClick={() => { otpFirstSlotRef.current?.focus({ preventScroll: true }); setShowOtpKb(true); }}
+                      >โฟกัส</Button>
+                      <Button variant="outline" size="sm" onClick={() => setShowOtpKb((v) => !v)}>
+                        {showOtpKb ? "ซ่อนแป้นพิมพ์" : "แสดงแป้นพิมพ์"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <InputOTP
+                    maxLength={6}
+                    value={otp}
+                    onChange={(v) => setOtp(String(v).replace(/\D/g, "").slice(0, 6))}
+                  >
+                    <InputOTPGroup>
+                      {[0,1,2,3,4,5].map((i) => (
+                        <InputOTPSlot
+                          key={i}
+                          index={i}
+                          ref={i === 0 ? otpFirstSlotRef : undefined}
+                          inputMode="numeric"
+                          enterKeyHint="done"
+                          aria-label={`digit-${i + 1}`}
+                          pattern="\d*"
+                          onFocus={(e) => { e.target.scrollIntoView({ block: "center" }); setShowOtpKb(true); }}
+                        />
+                      ))}
+                    </InputOTPGroup>
+                  </InputOTP>
+
+                  {!otpValid && otp.length > 0 && <p className="text-xs text-red-600">ต้องเป็นตัวเลข 6 หลัก</p>}
+
+                  {/* INLINE OTP KEYPAD */}
+                  <InlineOtpKeypad
+                    visible={showOtpKb}
+                    setValue={setOtp}
+                    onDone={() => {
+                      setShowOtpKb(false);
+                      setTimeout(() => otpFirstSlotRef.current?.focus({ preventScroll: true }), 30);
+                    }}
+                  />
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button type="button" variant="outline" size="sm" onClick={handleResend} disabled={!canResend || sending}>
+                      {sending ? (<><Loader size={14} className="mr-2" />ส่งรหัสใหม่</>) : ("ส่งรหัสใหม่")}
+                    </Button>
+                    {!canResend && <span className="text-xs text-gray-500">ขอรหัสใหม่ได้เมื่อครบเวลา</span>}
+                  </div>
+                </div>
+
+                {flowError && <div className="text-sm text-red-600">{flowError}</div>}
               </div>
 
               <DialogFooter className="mt-2">
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setStep("email");
-                    setOtp("");
-                    setFlowError(null);
+                    setStep("email"); setOtp(""); setFlowError(null);
+                    setShowOtpKb(false);
+                    setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
+                    setShowEmailKb(true);
                   }}
-                >
-                  กลับ
-                </Button>
+                >กลับ</Button>
                 <Button onClick={handleVerifyOtp} disabled={!otpValid || sending}>
-                  {sending ? "กำลังยืนยัน…" : "ยืนยันรหัส"}
+                  {sending ? (<><Loader size={16} className="mr-2" />กำลังยืนยัน…</>) : ("ยืนยันรหัส")}
                 </Button>
               </DialogFooter>
             </>

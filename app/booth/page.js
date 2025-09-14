@@ -1,3 +1,4 @@
+// app/booth/page.js  (หรือไฟล์/เพจที่มี BoothPage ของคุณ)
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -14,7 +15,7 @@ const MONGO_BASE = process.env.NEXT_PUBLIC_MONGO_BASE || "";
 const NC_BASE    = process.env.NEXT_PUBLIC_NC_BASE || "";
 
 const RETRY_MS = 30000;
-const PROG_TICK = 100;                     
+const PROG_TICK = 100;
 const PROG_STEP = 100 / (RETRY_MS / PROG_TICK);
 
 async function ping(base, path = "/api/health", timeout = 2500) {
@@ -46,7 +47,7 @@ export default function BoothPage() {
   // notice = { text, variant, sticky }
   const [notice, setNotice] = useState(null);
   const [noticeVisible, setNoticeVisible] = useState(false);
-  const [progress, setProgress] = useState(100); 
+  const [progress, setProgress] = useState(100);
   const hideTimerRef = useRef(null);
   const removeTimerRef = useRef(null);
   const progressTimerRef = useRef(null);
@@ -103,9 +104,9 @@ export default function BoothPage() {
       setProgress(100);
       const bad = [];
       const okMongo = await ping(MONGO_BASE);
-      if (!okMongo) bad.push("DATABASE");   
+      if (!okMongo) bad.push("DATABASE");
       const okNc = await ping(NC_BASE);
-      if (!okNc) bad.push("CLOUD");         
+      if (!okNc) bad.push("CLOUD");
 
       if (!mounted) return;
 
@@ -137,44 +138,54 @@ export default function BoothPage() {
   const handleStartClick = () => setCurrentView("login");
   const handleBackToStart = () => setCurrentView("start");
 
-const handleLogin = async ({ phone, pin }) => {
-  setBusy(true);
-  try {
-    let existed = true;
+  const handleLogin = async ({ phone, pin }) => {
+    setBusy(true);
     try {
-      await client.getUserByNumber(phone);
+      let existed = true;
+      try {
+        await client.getUserByNumber(phone);
+      } catch (e) {
+        if (e?.status === 404) existed = false;
+        else throw e;
+      }
+
+      await client.ensureUserAndPin({ number: phone, pin });
+
+      // ✅ เก็บเบอร์ + PIN ไว้ใช้หน้า dashboard (สร้างรหัสลิงก์ Nextcloud)
+      if (typeof window !== "undefined") {
+        localStorage.setItem("pcc_user_phone", phone);
+        localStorage.setItem("pcc_user_pin", pin);
+      }
+
+      setUser({ phone });
+      setCurrentView("photobooth");
+      showNotice(existed ? "Signed in" : "New user created", "success", false, 4000);
     } catch (e) {
-      if (e?.status === 404) existed = false;
-      else throw e;
+      if (
+        !e?.status &&
+        (e?.name === "TypeError" || /Failed to fetch|NetworkError|fetch/i.test(e?.message || ""))
+      ) {
+        showNotice("API unreachable. Please check connection.", "warn", true);
+      } else if (e?.status === 401) {
+        showNotice("Wrong PIN", "error", false, 4000);
+      } else if (e?.status >= 500) {
+        showNotice("Server error: DATABASE", "error", true);
+      } else {
+        showNotice(`Login failed: ${e?.message || "REQUEST_FAILED"}`, "warn", false, 5000);
+      }
+    } finally {
+      setBusy(false);
     }
-
-    await client.ensureUserAndPin({ number: phone, pin });
-    // เก็บเบอร์ไว้ใช้หน้า dashboard
-    if (typeof window !== "undefined") {
-      localStorage.setItem("pcc_user_phone", phone);
-    }
-
-    setUser({ phone });
-    setCurrentView("photobooth");
-    showNotice(existed ? "Signed in" : "New user created", "success", false, 4000);
-  } catch (e) {
-    if (!e?.status && (e?.name === "TypeError" || /Failed to fetch|NetworkError|fetch/i.test(e?.message || ""))) {
-      showNotice("API unreachable. Please check connection.", "warn", true);
-    } else if (e?.status === 401) {
-      showNotice("Wrong PIN", "error", false, 4000);
-    } else if (e?.status >= 500) {
-      showNotice("Server error: DATABASE", "error", true);
-    } else {
-      showNotice(`Login failed: ${e?.message || "REQUEST_FAILED"}`, "warn", false, 5000);
-    }
-  } finally {
-    setBusy(false);
-  }
-};
+  };
 
   const handleLogout = () => {
     setUser(null);
     setCurrentView("start");
+    // ✅ ล้าง PIN และเบอร์ ตอนออกจากระบบ
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("pcc_user_phone");
+      localStorage.removeItem("pcc_user_pin");
+    }
     showNotice("Signed out", "success", false, 3000);
   };
 

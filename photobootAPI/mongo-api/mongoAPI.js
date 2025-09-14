@@ -54,11 +54,6 @@ const UserSchema = new mongoose.Schema(
       type: String,
       lowercase: true,
       trim: true,
-      // เอา default:null ออก เพื่อไม่ให้มีฟิลด์ gmail ที่เป็น null ติดในเอกสาร
-      validate: {
-        validator: (v) => v == null || /^[a-z0-9._%+-]+@gmail\.com$/i.test(v),
-        message: 'gmail Must end with @gmail.com only.',
-      },
     },
     consented: { type: Boolean, default: false },
   },
@@ -218,9 +213,6 @@ app.post('/api/user', async (req, res) => {
     // ใส่ gmail เฉพาะเมื่อส่งมาและ valid
     if (gmail != null) {
       const g = String(gmail).trim().toLowerCase();
-      if (!/^[a-z0-9._%+-]+@gmail\.com$/i.test(g)) {
-        return res.status(400).json({ ok: false, message: 'gmail Must end with @gmail.com only.' });
-      }
       payload.gmail = g;
     }
 
@@ -343,9 +335,6 @@ app.put('/api/user/:number/gmail', async (req, res) => {
 
     if (!shouldRemove) {
       gmail = String(raw).toLowerCase().trim();
-      if (!/^[a-z0-9._%+-]+@gmail\.com$/i.test(gmail)) {
-        return res.status(400).json({ ok: false, message: 'gmail Must end with @gmail.com only.' });
-      }
     }
 
     const updated = await User.findOneAndUpdate(

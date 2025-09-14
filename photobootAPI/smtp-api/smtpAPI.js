@@ -58,7 +58,13 @@ const hash = (s) => bcrypt.hash(s, 10);
 const genOTP = () => String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
 const now = () => new Date();
 const normalizeEmail = (e = '') => e.trim().toLowerCase();
-const isGmail = (e = '') => /^[a-z0-9._%+-]+@gmail\.com$/i.test(e);
+const isGmail = (e = '', domains = ['gmail.com', 'kmitl.ac.th']) => {
+  if (typeof e !== 'string') return false;
+  const m = e.trim().toLowerCase().match(/^[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})$/i);
+  if (!m) return false;                 // รูปแบบอีเมลไม่ถูก
+  const domain = m[1];
+  return domains.some(d => domain === d.toLowerCase());
+};
 
 // ---------- SERVER ----------
 const app = express();

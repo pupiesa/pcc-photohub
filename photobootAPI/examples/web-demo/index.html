@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PhotoboothAPI — Web Demo</title>
+  <title>PhotoboothAPI — Web Demo (SDK)</title>
   <style>
     :root { --bg:#0b1020; --card:#121a33; --ink:#e8eefc; --muted:#a9b4d6; --acc:#6aa7ff; --ok:#3ad29f; --err:#ff6b6b; }
     html,body{height:100%}
@@ -37,13 +37,14 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>📸 PhotoboothAPI — Web Demo</h1>
+  <h1>📸 PhotoboothAPI — Web Demo (SDK)</h1>
 
   <!-- CONFIG -->
   <div class="card">
     <div class="title">🔧 ตั้งค่า API</div>
     <div class="row"><label>Mongo API URL</label><input id="cfg_mongo" value="http://localhost:2000"/></div>
     <div class="row"><label>Nextcloud API URL</label><input id="cfg_nc" value="http://localhost:1000"/></div>
+    <div class="row"><label>SMTP API URL (ถ้ามี)</label><input id="cfg_smtp" placeholder="http://localhost:3000"/></div>
     <div class="btns">
       <button id="btnSaveCfg">Save</button>
       <button id="btnPing" class="ok">Ping APIs</button>
@@ -73,7 +74,7 @@
     <div class="card">
       <div class="title">2) Upload รูป</div>
 
-      <!-- A) Upload หลายไฟล์ ด้วย file picker (ต้องมี endpoint /upload-bytes ที่ nextcloud-api) -->
+      <!-- A) Upload หลายไฟล์ ผ่านเบราว์เซอร์ (ต้องมี endpoint /upload-bytes ที่ nextcloud-api) -->
       <div class="row"><label>Folder Name</label><input id="up_folder" placeholder="เช่น ใช้เบอร์โทรเป็นโฟลเดอร์"/></div>
       <div class="row"><label>เลือกไฟล์ (หลายไฟล์)</label><input id="up_files" type="file" multiple /></div>
       <div class="row"><label>Note</label><input id="up_note" value="ProjectPhoto_PCC"/></div>
@@ -81,6 +82,7 @@
       <div class="row"><label>Expire (YYYY-MM-DD)</label><input id="up_exp" placeholder="2026-12-31"/></div>
       <div class="btns">
         <button id="btnUploadBytesOnly">Upload (bytes) Only</button>
+        <button id="btnUploadBytesShare" class="ok">Upload (bytes) + Share (first)</button>
       </div>
 
       <hr style="opacity:.2;margin:14px 0">
@@ -165,10 +167,27 @@ D:\cam\shot1.png
 </div>
 
 <script type="module">
-  // ======= SDK (inline) — no auth flow =======
-  class PhotoboothClient {
-    constructor({ mongoBase, ncBase }) { this.mongo = mongoBase.replace(/\/$/,''); this.nc = ncBase.replace(/\/$/,''); }
+  /* ============ Crash guard: log error ลงกล่อง Log เสมอ ============ */
+  const _safeLog = (msg) => {
+    const pre = document.querySelector('#log');
+    if (!pre) return;
+    pre.textContent += `\n\n${msg}`;
+    pre.scrollTop = pre.scrollHeight;
+  };
+  window.addEventListener('error', (e) => {
+    _safeLog(`🚨 JS Error: ${e.message}\n  at ${e.filename}:${e.lineno}:${e.colno}`);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason;
+    _safeLog(`🚨 Promise Rejection: ${r?.message || r}`);
+  });
 
+  /* ============ SDK (inline) ============ */
+  class PhotoboothClient {
+    constructor({ mongoBase, ncBase }) {
+      this.mongo = (mongoBase || '').replace(/\/$/, '');
+      this.nc    = (ncBase || '').replace(/\/$/, '');
+    }
     // USER
     getUserByNumber(n){ return this._get(`${this.mongo}/api/user/by-number/${encodeURIComponent(n)}`) }
     createUser(b){ return this._post(`${this.mongo}/api/user`, b) }
@@ -179,7 +198,6 @@ D:\cam\shot1.png
       try { return await this.getUserByNumber(number); }
       catch(e){ if(e.status!==404) throw e; await this.createUser({number,pin}); return await this.getUserByNumber(number); }
     }
-
     // PROMO
     listPromos({active}={}){ const q=active?"?active=true":""; return this._get(`${this.mongo}/api/promos${q}`) }
     createPromo(b){ return this._post(`${this.mongo}/api/promos`,b) }
@@ -188,11 +206,9 @@ D:\cam\shot1.png
     deactivatePromo(c){ return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/deactivate`) }
     validatePromo(c,b){ return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/validate`,b) }
     redeemPromo(c,b){ return this._post(`${this.mongo}/api/promos/${encodeURIComponent(c)}/redeem`,b) }
-
     // NEXTCLOUD
     uploadAndShare(b){ return this._post(`${this.nc}/api/nextcloud/upload-and-share`, b) }
     uploadOnly(b){ return this._post(`${this.nc}/api/nextcloud/upload`, b) }
-    // (ใหม่) อัปโหลดไฟล์เป็นไบต์ (ต้องมี endpoint ใน nextcloud-api)
     async uploadBytes({ folderName, file, targetName, share=false, note, linkPassword, expiration, forceNew }) {
       const ep = share ? '/api/nextcloud/upload-bytes-share' : '/api/nextcloud/upload-bytes';
       const url = `${this.nc}${ep}`;
@@ -209,10 +225,8 @@ D:\cam\shot1.png
       const r = await fetch(url, { method:'POST', body: fd });
       return this._handle(r);
     }
-
     // GALLERY
     getUserGallery(number){ return this._get(`${this.mongo}/api/user/${encodeURIComponent(number)}/gallery`) }
-
     // CHANGE SHARE PASSWORD
     changeSharePassword({ folderName, newPassword, expiration, note, publicUpload, permissions }) {
       return this._post(`${this.nc}/api/nextcloud/change-share-password`, { folderName, newPassword, expiration, note, publicUpload, permissions });
@@ -220,49 +234,34 @@ D:\cam\shot1.png
     changeSharePasswordForUser({ number, newPassword, expiration, note, publicUpload, permissions }) {
       return this.changeSharePassword({ folderName:number, newPassword, expiration, note, publicUpload, permissions });
     }
-
-    // ORCHESTRATION: เปลี่ยน PIN แล้ว sync cloud password
-    async changePinAndSyncCloud({ number, newPin, expiration, note, publicUpload, permissions, throwOnCloudFail=false }) {
-      await this.changePin(number, newPin);
-      try{
-        const cloudRes = await this.changeSharePasswordForUser({ number, newPassword:newPin, expiration, note, publicUpload, permissions });
-        return { ok:true, cloud: cloudRes };
-      }catch(e){
-        if (throwOnCloudFail) { const err=new Error(`PIN updated, but cloud password update failed: ${e?.message||'CLOUD_SYNC_FAILED'}`); err.status=e?.status||e?.payload?.status||500; err.cause=e; throw err; }
-        return { ok:true, cloud:null, warning:{ message:'PIN updated, but failed to update cloud link password.', error:e?.message||String(e) } };
-      }
-    }
-
     // helpers
     async _get(u){const r=await fetch(u); return this._handle(r)}
-    async _post(u,b){const r=await fetch(u,{method:'POST',headers:{},body: (b && !(b instanceof FormData)) ? JSON.stringify(b) : (b||null), ...(b && !(b instanceof FormData) ? {headers:{'Content-Type':'application/json'}}:{} )}); return this._handle(r)}
+    async _post(u,b){
+      const isFD = (typeof FormData!=='undefined') && (b instanceof FormData);
+      const r=await fetch(u,{
+        method:'POST',
+        ...(isFD ? { body:b } : { headers:{'Content-Type':'application/json'}, body: b?JSON.stringify(b):null })
+      });
+      return this._handle(r);
+    }
     async _patch(u,b){const r=await fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return this._handle(r)}
     async _handle(r){ let data=null; try{data=await r.json()}catch{data={}} if(!r.ok || data?.ok===false){const e=new Error(data?.message||data?.error||`HTTP_${r.status}`); e.status=r.status; e.payload=data; throw e} return data }
   }
 
-  // ===== Utilities =====
+  /* ============ Utilities ============ */
   const $ = (s)=>document.querySelector(s);
   const logEl = $('#log');
-  function log(title, data){ const t=(typeof data==='string')?data:JSON.stringify(data,null,2); logEl.textContent += `\n\n› ${title}\n`+t; logEl.scrollTop=logEl.scrollHeight; }
+  function log(title, data){
+    const t=(typeof data==='string')?data:JSON.stringify(data,null,2);
+    logEl.textContent += `\n\n› ${title}\n`+t;
+    logEl.scrollTop=logEl.scrollHeight;
+  }
   function clearLog(){ logEl.textContent='Ready.'; }
   function getCfg(){ return JSON.parse(localStorage.getItem('pb_cfg')||'{}'); }
   function saveCfg(v){ localStorage.setItem('pb_cfg', JSON.stringify(v)); }
   function api(){ const {mongoBase,ncBase}=getCfg(); return new PhotoboothClient({ mongoBase, ncBase }); }
   function splitPaths(s){ const a=(s||'').trim(); if(!a) return []; return a.split(/[,|\r?\n]+/).map(t=>t.trim()).filter(Boolean); }
-
-  // derive preview url from relative path (for /api/nextcloud/preview)
-  function buildPreview(rel){ const {ncBase}=getCfg(); return `${ncBase.replace(/\/$/,'')}/api/nextcloud/preview?path=${encodeURIComponent(rel)}`; }
-  function deriveRelFromItem(it){
-    if (it?.path) return String(it.path).replace(/^\/+/,'');
-    if (it?.name) return String(it.name).replace(/^\/+/,'');
-    try{
-      if (it?.previewUrl){ const u=new URL(it.previewUrl); const f=u.searchParams.get('file'); if (f) return decodeURIComponent(f).replace(/^\/+/,''); }
-    }catch{}
-    try{
-      if (it?.downloadUrl){ const u=new URL(it.downloadUrl); const dir=u.searchParams.get('path'); const files=u.searchParams.get('files'); if(files){ const d=dir?decodeURIComponent(dir).replace(/^\/+/,''):''; return d?`${d}/${files}`:files; } }
-    }catch{}
-    return '';
-  }
+  function buildPreview(rel){ const {ncBase}=getCfg(); return `${(ncBase||'').replace(/\/$/,'')}/api/nextcloud/preview?path=${encodeURIComponent(rel)}`; }
   function toCloudPath(resp){
     const up = resp?.uploaded || resp || {};
     const remote = up.remotePath || up.remote || '';
@@ -273,48 +272,75 @@ D:\cam\shot1.png
     return file || folder || null;
   }
 
-  // ===== Init UI =====
+  /* ============ Init UI ============ */
+  // เติมค่า default ครั้งแรก และ save ไว้ให้เลย เพื่อไม่ให้เป็น undefined
+  if (!localStorage.getItem('pb_cfg')) {
+    saveCfg({ mongoBase:'http://localhost:2000', ncBase:'http://localhost:1000' });
+  }
   const cfgSaved = getCfg();
   if (cfgSaved.mongoBase) $('#cfg_mongo').value = cfgSaved.mongoBase;
   if (cfgSaved.ncBase)    $('#cfg_nc').value    = cfgSaved.ncBase;
 
-  // Save & Ping
-  $('#btnSaveCfg').onclick = ()=>{ saveCfg({ mongoBase:$('#cfg_mongo').value.trim(), ncBase:$('#cfg_nc').value.trim() }); log('Saved config', getCfg()); };
-  $('#btnPing').onclick = async ()=>{
-    const {mongoBase,ncBase} = getCfg();
-    try{ const m = await fetch(`${mongoBase.replace(/\/$/,'')}/health`, {cache:'no-store'}).then(r=>r.json()); log('Ping Mongo', m); }catch(e){ log('Ping Mongo error', String(e)); }
-    try{ const n = await fetch(`${ncBase.replace(/\/$/,'')}/api/health`, {cache:'no-store'}).then(r=>r.json()); log('Ping Nextcloud', n); }catch(e){ log('Ping Nextcloud error', String(e)); }
+  /* ============ Config buttons ============ */
+  const bindIf = (sel, handler) => {
+    const el = document.querySelector(sel);
+    if (el) el.onclick = handler;
+    else _safeLog(`ℹ️ Skipped binding: ${sel} (not found)`);
   };
 
-  // ===== User =====
-  $('#btnEnsureUser').onclick = async ()=>{
+  bindIf('#btnSaveCfg', () => {
+    saveCfg({ mongoBase:$('#cfg_mongo').value.trim(), ncBase:$('#cfg_nc').value.trim() });
+    log('Saved config', getCfg());
+  });
+
+  bindIf('#btnPing', async () => {
+    const {mongoBase,ncBase} = getCfg();
+    try{
+      const m = await fetch(`${(mongoBase||'').replace(/\/$/,'')}/health`, {cache:'no-store'}).then(r=>r.json());
+      log('Ping Mongo', m);
+    }catch(e){
+      log('Ping Mongo error', String(e));
+    }
+    try{
+      const n = await fetch(`${(ncBase||'').replace(/\/$/,'')}/api/health`, {cache:'no-store'}).then(r=>r.json());
+      log('Ping Nextcloud', n);
+    }catch(e){
+      log('Ping Nextcloud error', String(e));
+    }
+  });
+
+  /* ============ User actions ============ */
+  bindIf('#btnEnsureUser', async ()=>{
     const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim();
     const cli=api();
     try{ const r=await cli.ensureUser({number,pin}); log('EnsureUser', r); $('#up_folder').value = number; $('#gal_number').value = number; }
     catch(e){ log('EnsureUser error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnGetUser').onclick = async ()=>{
+  });
+  bindIf('#btnGetUser', async ()=>{
     const number=$('#u_number').value.trim(); const cli=api();
     try{ const r=await cli.getUserByNumber(number); log('GetUser', r); }
     catch(e){ log('GetUser error', {status:e.status, message:e.message}); }
-  };
-  $('#btnCreateUser').onclick = async ()=>{
+  });
+  bindIf('#btnCreateUser', async ()=>{
     const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const cli=api();
     try{ const r=await cli.createUser({number,pin}); log('CreateUser', r); }
     catch(e){ log('CreateUser error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnChangePin').onclick = async ()=>{
+  });
+  bindIf('#btnChangePin', async ()=>{
     const number=$('#u_number').value.trim(); const pin=$('#u_pin').value.trim(); const cli=api();
     try{ const r=await cli.changePin(number, pin); log('ChangePin', r); }
     catch(e){ log('ChangePin error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnSyncPinCloud').onclick = async ()=>{
+  });
+  bindIf('#btnSyncPinCloud', async ()=>{
     const number=$('#u_number').value.trim(); const newPin=$('#u_pin').value.trim(); const cli=api();
-    try{ const r=await cli.changePinAndSyncCloud({ number, newPin }); log('ChangePinAndSyncCloud', r); }
-    catch(e){ log('ChangePinAndSyncCloud error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
+    try{
+      await cli.changePin(number, newPin);
+      const r = await cli.changeSharePasswordForUser({ number, newPassword:newPin });
+      log('ChangePin & Sync Cloud Password', r);
+    }catch(e){ log('ChangePinAndSyncCloud error', {status:e.status, message:e.message, payload:e.payload}); }
+  });
 
-  // ===== Upload (bytes) =====
+  /* ============ Upload (bytes) ============ */
   async function uploadBytesMany({ share }){
     const files = $('#up_files').files;
     const number = $('#u_number').value.trim();
@@ -335,10 +361,10 @@ D:\cam\shot1.png
           note, linkPassword, expiration, forceNew:false
         });
         log(share && i===0 ? 'UploadBytes+Share' : 'UploadBytes', res);
+
         const remote = toCloudPath(res);
         if (remote) remotes.push(remote);
 
-        // ถ้าสร้างลิงก์แชร์ได้ครั้งแรก -> patch ลง user
         if (share && i===0 && res?.share?.url) {
           await cli.setNextcloudLink(number, res.share.url);
           log('Patched nextcloud_link', { number, link: res.share.url });
@@ -352,23 +378,24 @@ D:\cam\shot1.png
       log('UploadBytes error', {status:e.status, message:e.message, payload:e.payload});
     }
   }
-  $('#btnUploadBytesShare').onclick = ()=>uploadBytesMany({ share:true });
-  $('#btnUploadBytesOnly').onclick  = ()=>uploadBytesMany({ share:false });
+  // กัน null: มีปุ่มเท่าไหร่ ผูกเท่านั้น
+  bindIf('#btnUploadBytesOnly',  ()=>uploadBytesMany({ share:false }));
+  bindIf('#btnUploadBytesShare', ()=>uploadBytesMany({ share:true })); // จะไม่ล้มถ้าไม่มีปุ่ม
 
-  // ===== Upload (server paths โหมดเดิม) =====
-  $('#btnFlowUpload').onclick = async ()=>{
+  /* ============ Upload (server paths) ============ */
+  bindIf('#btnFlowUpload', async ()=>{
     const cli=api(); const number=$('#u_number').value.trim();
     const folder=$('#up_folder').value.trim() || number;
     const paths = splitPaths($('#up_server_paths').value);
     const note=$('#up_note').value; const linkPassword=$('#up_pass').value; const expiration=$('#up_exp').value || undefined;
     try{
       if (paths.length===0) throw new Error('กรุณาระบุไฟล์อย่างน้อย 1 ไฟล์');
-      // ensure user ก่อน
       await cli.ensureUser({ number, pin: $('#u_pin').value.trim() });
 
-      const user = (await cli.getUserByNumber(number)).data;
+      const u = await cli.getUserByNumber(number);
+      const hasLink = !!u?.data?.nextcloud_link;
       const remotes=[];
-      if (!user.nextcloud_link){
+      if (!hasLink){
         const up1 = await cli.uploadAndShare({ folderName:folder, filePath: paths[0], note, linkPassword, expiration });
         log('Upload+Share (first)', up1);
         if (up1?.share?.url) await cli.setNextcloudLink(number, up1.share.url);
@@ -390,9 +417,9 @@ D:\cam\shot1.png
         log('Append file_address', { number, files: remotes });
       }
     }catch(e){ log('FlowUpload error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
+  });
 
-  $('#btnUploadShare').onclick = async ()=>{
+  bindIf('#btnUploadShare', async ()=>{
     const cli=api(); const number=$('#u_number').value.trim();
     const folder=$('#up_folder').value.trim() || number;
     const first = splitPaths($('#up_server_paths').value)[0];
@@ -404,9 +431,9 @@ D:\cam\shot1.png
       if (r?.share?.url){ await cli.setNextcloudLink(number, r.share.url); log('Patched nextcloud_link', {number, link:r.share.url}); }
       const remote = toCloudPath(r); if (remote) { await cli.appendFileAddress(number, [remote]); log('Append file_address', {number, files:[remote]}); }
     }catch(e){ log('Upload+Share error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
+  });
 
-  $('#btnUploadOnly').onclick = async ()=>{
+  bindIf('#btnUploadOnly', async ()=>{
     const cli=api(); const number=$('#u_number').value.trim(); const folder=$('#up_folder').value.trim()||number;
     const paths = splitPaths($('#up_server_paths').value);
     try{
@@ -419,10 +446,10 @@ D:\cam\shot1.png
       }
       if (remotes.length){ await cli.appendFileAddress(number, remotes); log('Append file_address', {number, files: remotes}); }
     }catch(e){ log('UploadOnly error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
+  });
 
-  // ===== Gallery =====
-  $('#btnLoadGallery').onclick = async ()=>{
+  /* ============ Gallery ============ */
+  bindIf('#btnLoadGallery', async ()=>{
     const number = $('#gal_number').value.trim() || $('#u_number').value.trim();
     const cli=api(); const info=$('#galleryInfo'); const cont=$('#thumbs');
     cont.innerHTML=''; info.textContent='Loading…';
@@ -438,45 +465,45 @@ D:\cam\shot1.png
       });
       if (files.length===0){ cont.innerHTML='<div class="muted">No photos.</div>'; return; }
       cont.innerHTML = files.map(it=>{
-        const rel = deriveRelFromItem(it);
+        const rel = (it?.path || it?.name || '').replace(/^\/+/, '');
         const src = buildPreview(rel);
         return `<div class="thumb"><img src="${src}" alt=""></div>`;
       }).join('');
     }catch(e){
       info.textContent='Load failed.'; log('LoadGallery error', {status:e.status, message:e.message, payload:e.payload});
     }
-  };
+  });
 
-  // ===== Promo =====
-  $('#btnPromoCreate').onclick = async ()=>{
+  /* ============ Promo ============ */
+  bindIf('#btnPromoCreate', async ()=>{
     const cli=api(); const code=$('#pm_code').value.trim(); const type=$('#pm_type').value; const value=Number($('#pm_value').value||0);
     try{
       const now=new Date(); const end=new Date(Date.now()+86400000*30);
       const body={ code, type, value, start_at: now, end_at: end, usage_limit:1000, per_user_limit:1, is_active:true };
       const r=await cli.createPromo(body); log('Promo created', r);
     }catch(e){ log('Promo create error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnPromoValidate').onclick = async ()=>{
+  });
+  bindIf('#btnPromoValidate', async ()=>{
     const cli=api(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
     try{ const r=await cli.validatePromo(code,{userNumber:number, orderAmount:amt}); log('Promo validate', r); }
     catch(e){ log('Promo validate error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnPromoRedeem').onclick = async ()=>{
+  });
+  bindIf('#btnPromoRedeem', async ()=>{
     const cli=api(); const code=$('#pm_code').value.trim(); const number=$('#u_number').value.trim(); const amt=Number($('#pm_amt').value||0);
     try{ const r=await cli.redeemPromo(code,{userNumber:number, orderAmount:amt}); log('Promo redeem', r); }
     catch(e){ log('Promo redeem error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
-  $('#btnPromoList').onclick = async ()=>{
+  });
+  bindIf('#btnPromoList', async ()=>{
     const cli=api();
     try{ const r=await cli.listPromos({active:true}); log('Promo list (active)', r); }
     catch(e){ log('Promo list error', {status:e.status, message:e.message}); }
-  };
+  });
 
-  // ===== Cloud Link Password =====
-  $('#btnChangeSharePass').onclick = async ()=>{
+  /* ============ Change Share Password ============ */
+  bindIf('#btnChangeSharePass', async ()=>{
     const folderName=$('#cp_folder').value.trim();
-    const newPassword=$('#cp_newpass').value; // เว้นว่าง = ลบรหัส
-    const expiration=$('#cp_exp').value;      // "" = ลบวันหมดอายุ, undefined = ไม่แตะ
+    const newPassword=$('#cp_newpass').value;
+    const expiration=$('#cp_exp').value;
     const note=$('#cp_note').value;
     const pubSel=$('#cp_pub').value;
     const publicUpload = pubSel==='' ? undefined : (pubSel==='true');
@@ -487,10 +514,11 @@ D:\cam\shot1.png
       const r = await cli.changeSharePassword({ folderName, newPassword, expiration, note, publicUpload, permissions });
       log('ChangeSharePassword', r);
     }catch(e){ log('ChangeSharePassword error', {status:e.status, message:e.message, payload:e.payload}); }
-  };
+  });
 
-  // Log clear
-  $('#btnClearLog').onclick = clearLog;
+  /* ============ Log clear ============ */
+  bindIf('#btnClearLog', clearLog);
 </script>
+
 </body>
 </html>

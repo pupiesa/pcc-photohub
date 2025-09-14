@@ -1,7 +1,10 @@
+// app/layout.js
 import { ThemeProvider } from "@/components/themeprovider";
 import "./globals.css";
 import React from "react";
 import LayoutWrapper from "@/components/Layoutwrapper";
+import { Toaster } from "sonner"; // ✅ ใช้ sonner แทน toast เดิม
+
 export const metadata = {
   title: "PCC Photo Hub",
   description: "photo booth application with live camera preview and capture",
@@ -24,6 +27,13 @@ export default function RootLayout({ children }) {
           disableTransitionOnChange
         >
           <LayoutWrapper>{children}</LayoutWrapper>
+          <Toaster
+            richColors
+            closeButton
+            position="top-center"
+            expand={false}
+            duration={3000}
+          />
         </ThemeProvider>
       </body>
     </html>
