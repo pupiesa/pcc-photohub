@@ -25,7 +25,7 @@ import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradien
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const NC_BASE = process.env.NEXT_PUBLIC_NC_BASE || "/ncapi";
-const OTP_TOTAL_SECS = 120;
+const OTP_TOTAL_SECS = 80;
 
 const buildProxyPreview = (relPath) =>
   `${(NC_BASE || "").replace(/\/$/, "")}/api/nextcloud/preview?path=${encodeURIComponent(relPath)}`;
@@ -93,7 +93,7 @@ function InlineOtpKeypad({ visible, setValue, onDone }) {
         <Button variant="secondary" onClick={() => press("0")}>0</Button>
         <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
       </div>
-      <div className="flex gap-2 pt-2">
+      <div className="flex gap-2 pt-2 justify-end">
         <Button onClick={onDone}>เสร็จสิ้น</Button>
       </div>
     </div>
@@ -103,6 +103,7 @@ function InlineOtpKeypad({ visible, setValue, onDone }) {
 function InlineEmailKeyboard({ visible, setValue, onDone }) {
   if (!visible) return null;
   const rows = [
+    ["1","2","3","4","5","6","7","8","9","0"],
     ["q","w","e","r","t","y","u","i","o","p"],
     ["a","s","d","f","g","h","j","k","l","@"],
     ["z","x","c","v","b","n","m",".","_","-"],
@@ -290,7 +291,7 @@ export default function CustomerDashboard() {
     if (!phone) return;
     setFlowError(null); setSending(true);
     try {
-      await client.requestEmailOTP({ number: phone, email: email.trim() });
+      await client.requestEmailOTP({ number: phone, email: email.trim(), heading: 'Verify your email' });
       setStep("otp");
       setOtpTimerKey((k) => k + 1);
       toast.success("ส่งรหัส OTP แล้ว ตรวจอีเมลของคุณ");
@@ -313,7 +314,7 @@ export default function CustomerDashboard() {
     if (!phone || !canResend) return;
     setFlowError(null); setSending(true);
     try {
-      await client.requestEmailOTP({ number: phone, email: email.trim() });
+      await client.requestEmailOTP({ number: phone, email: email.trim(), heading: 'Verify your email' });
       setOtp(""); setOtpTimerKey((k) => k + 1);
       setTimeout(() => otpFirstSlotRef.current?.focus({ preventScroll: true }), 30);
       toast.success("ส่งรหัสใหม่แล้ว");
@@ -453,7 +454,7 @@ export default function CustomerDashboard() {
         </Card>
       </div>
 
-      {/* Email + Terms + OTP Flow (สามสเต็ปใน Dialog เดียว) */}
+      {/* Email + Terms + OTP Flow */}
       <Dialog
         open={openEmailFlow}
         onOpenChange={(open) => {

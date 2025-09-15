@@ -83,7 +83,7 @@ export class PhotoboothClient {
   }
 
   // ---------- EMAIL OTP ----------
-  requestEmailOTP({ number, email }) { this._requireSMTP('requestEmailOTP'); return this._post(`${this.smtp}/email/verify/request`, { number, email }); }
+  requestEmailOTP({ number, email, heading }) { this._requireSMTP('requestEmailOTP'); return this._post(`${this.smtp}/email/verify/request`, { number, email, heading }); }
   confirmEmailOTP({ number, email, otp }) { this._requireSMTP('confirmEmailOTP'); return this._post(`${this.smtp}/email/verify/confirm`, { number, email, otp }); }
   async startEmailVerification({ number, email }) { const r = await this.requestEmailOTP({ number, email }); return { ok: true, hint: 'Check your email for the 6-digit code.', ...r }; }
   async confirmEmailAndReloadUser({ number, email, otp }) {

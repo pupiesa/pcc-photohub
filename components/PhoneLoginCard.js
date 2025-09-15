@@ -1,6 +1,7 @@
 "use client";
+
 import { useState } from "react";
-import { client } from "@/lib/photoboothClient";
+import { client } from "@/lib/photoboothClient"; // ใช้ ensureUserAndPin / getUserByNumber
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
@@ -8,9 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Phone, Shield, Loader2, UserPlus } from "lucide-react";
+import { ArrowLeft, Phone, Shield, UserPlus } from "lucide-react";
+import { Loader } from "@/components/ui/shadcn-io/ai/loader"; // ใช้ Loader ตามที่ต้องการ
 
-const PhoneLoginCard = ({ onBack, onLogin }) => {
+/**
+ * props:
+ *  - onBack(): void
+ *  - onLogin({ phone, pin, mode }): void   // mode: "login" | "signup"
+ *  - onForgotPin?(phone: string): void     // เปิด dialog ลืม PIN
+ */
+const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
@@ -52,7 +60,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
       if (mode === "signup") {
         setStep("otpConfirm"); // ให้ยืนยัน PIN อีกรอบ
       } else {
-        onLogin({ phone: phoneNumber, pin, mode: "login" });
+        onLogin?.({ phone: phoneNumber, pin, mode: "login" });
       }
       return;
     }
@@ -63,7 +71,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
         setPin2("");
         return;
       }
-      onLogin({ phone: phoneNumber, pin, mode: "signup" });
+      onLogin?.({ phone: phoneNumber, pin, mode: "signup" });
     }
   };
 
@@ -78,13 +86,9 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
   };
 
   const handleBackspace = () => {
-    if (step === "phone") {
-      setPhoneNumber((prev) => prev.slice(0, -1));
-    } else if (step === "otp") {
-      setPin((prev) => prev.slice(0, -1));
-    } else {
-      setPin2((prev) => prev.slice(0, -1));
-    }
+    if (step === "phone") setPhoneNumber((p) => p.slice(0, -1));
+    else if (step === "otp") setPin((p) => p.slice(0, -1));
+    else setPin2((p) => p.slice(0, -1));
   };
 
   const headerIcon =
@@ -108,7 +112,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => (step === "otpConfirm" ? setStep("otp") : onBack())}
+          onClick={() => (step === "otpConfirm" ? setStep("otp") : onBack?.())}
           className="self-start p-2 h-auto hover:bg-gray-100 dark:hover:bg-gray-800"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -131,11 +135,8 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
               <CardTitle className="text-xl">Enter your phone number</CardTitle>
               <CardDescription>We’ll use this to find your album.</CardDescription>
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="phone" className="text-gray-700 dark:text-gray-300">
-                Phone Number
-              </Label>
+              <Label htmlFor="phone" className="text-gray-700 dark:text-gray-300">Phone Number</Label>
               <div className="relative">
                 <Input
                   id="phone"
@@ -160,22 +161,17 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
                  mode === "signup" && step === "otpConfirm" ? "Confirm your PIN" :
                  "Enter your 6-digit PIN"}
               </CardTitle>
-              <CardDescription>
-                {formatPhoneDisplay(phoneNumber)}
-              </CardDescription>
+              <CardDescription>{formatPhoneDisplay(phoneNumber)}</CardDescription>
             </div>
-
             <div className="space-y-2">
               <Label className="text-gray-700 dark:text-gray-300">PIN</Label>
               <Input
                 value={(step === "otp" ? pin : pin2).split("").join(" ")}
                 readOnly
-                placeholder={step === "otpConfirm" ? "_ _ _ _ _ _" : "_ _ _ _ _ _"}
+                placeholder="_ _ _ _ _ _"
                 className="text-center text-2xl font-mono h-16 text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/50 tracking-widest border-gray-200 dark:border-gray-700"
               />
-              {!!errMsg && (
-                <div className="text-xs text-rose-600 dark:text-rose-400">{errMsg}</div>
-              )}
+              {!!errMsg && <div className="text-xs text-rose-600 dark:text-rose-400">{errMsg}</div>}
             </div>
           </div>
         )}
@@ -224,7 +220,7 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Loader className="mr-2" />
                   Processing...
                 </>
               ) : step === "phone" ? (
@@ -236,6 +232,19 @@ const PhoneLoginCard = ({ onBack, onLogin }) => {
               )}
             </Button>
           </div>
+
+          {/* ลืม PIN เฉพาะโหมดล็อกอิน */}
+          {step !== "phone" && mode === "login" && (
+            <div className="text-center">
+              <button
+                type="button"
+                className="text-sm text-blue-600 hover:underline"
+                onClick={() => onForgotPin?.(phoneNumber)}
+              >
+                ลืม PIN ?
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Progress Indicator */}

@@ -77,6 +77,7 @@ app.post('/email/verify/request', async (req, res) => {
   try {
     const number = String(req.body.number || '').trim();
     const email = normalizeEmail(req.body.email);
+    const heading = req.body.heading || 'Verify your User';
     if (!number || !email) return res.status(400).json({ error: 'Number and Email required' });
     if (!isGmail(email)) return res.status(400).json({ error: 'Email must end with @gmail.com' });
 
@@ -108,7 +109,7 @@ app.post('/email/verify/request', async (req, res) => {
         text: `Your verification code is ${otp}. It expires in ${OTP_TTL_MIN} minutes.`,
         html: `
           <div style="font-family:system-ui,Segoe UI,Roboto,Arial">
-            <h2>Verify your email</h2>
+            <h2>${heading}</h2>
             <p>Use this code within ${OTP_TTL_MIN} minutes:</p>
             <div style="font-size:28px;letter-spacing:4px;font-weight:700">${otp}</div>
             <p>If you didn't request this, you can ignore this email.</p>
