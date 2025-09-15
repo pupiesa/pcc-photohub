@@ -94,7 +94,6 @@ function InlineOtpKeypad({ visible, setValue, onDone }) {
         <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
       </div>
       <div className="flex gap-2 pt-2">
-        <Button variant="outline" onClick={() => press("paste")}>วาง</Button>
         <Button onClick={onDone}>เสร็จสิ้น</Button>
       </div>
     </div>
@@ -128,9 +127,8 @@ function InlineEmailKeyboard({ visible, setValue, onDone }) {
           </div>
         ))}
         <div className="flex gap-1 justify-center">
-          <Button variant="secondary" onClick={() => press(".com")}>.com</Button>
-          <Button variant="secondary" onClick={() => press(".co.th")}>.co.th</Button>
-          <Button variant="outline" onClick={() => press("paste")}>วาง</Button>
+          <Button variant="secondary" onClick={() => press("@gmail.com")}>@gmail.com</Button>
+          <Button variant="secondary" onClick={() => press(".ac.th")}>.ac.th</Button>
           <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
           <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
         </div>
@@ -152,9 +150,10 @@ export default function CustomerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // email/otp dialog
+  // dialog steps: email -> terms -> otp
   const [openEmailFlow, setOpenEmailFlow] = useState(false);
-  const [step, setStep] = useState("email"); // "email" | "otp"
+  const [step, setStep] = useState/** @type {"email"|"terms"|"otp"} */("email");
+
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
   const [sending, setSending] = useState(false);
@@ -170,7 +169,7 @@ export default function CustomerDashboard() {
   const [showEmailKb, setShowEmailKb] = useState(false);
   const [showOtpKb, setShowOtpKb] = useState(false);
 
-  // ตัวกั้นสำหรับ Email keyboard (กัน onFocus เปิดซ้ำหลังกดเสร็จสิ้น)
+  // suppress onFocus auto-open after "Done"
   const emailKbSuppressRef = useRef(false);
 
   const emailInputRef = useRef(null);
@@ -223,7 +222,7 @@ export default function CustomerDashboard() {
 
   const otpValid = useMemo(() => /^\d{6}$/.test(otp.trim()), [otp]);
 
-  // focus + auto popup soft keyboards
+  // focus + auto popup keyboards according to step
   useEffect(() => {
     if (!openEmailFlow) return;
     const t = setTimeout(() => {
@@ -236,6 +235,10 @@ export default function CustomerDashboard() {
       if (step === "otp" && otpFirstSlotRef.current) {
         otpFirstSlotRef.current.focus({ preventScroll: true });
         setShowOtpKb(true);
+      }
+      if (step === "terms") {
+        setShowEmailKb(false);
+        setShowOtpKb(false);
       }
     }, 50);
     return () => clearTimeout(t);
@@ -274,6 +277,15 @@ export default function CustomerDashboard() {
     );
   };
 
+  // NEW: ไปหน้า "terms" จากหน้า email (ยังไม่ส่ง OTP ตรงนี้)
+  const handleGoTerms = () => {
+    if (!emailValid) return;
+    setFlowError(null);
+    setShowEmailKb(false);
+    setStep("terms");
+  };
+
+  // ส่ง OTP จากหน้า "terms" แล้วค่อยไปหน้า OTP
   const handleSendOtp = async () => {
     if (!phone) return;
     setFlowError(null); setSending(true);
@@ -441,7 +453,7 @@ export default function CustomerDashboard() {
         </Card>
       </div>
 
-      {/* Email + OTP Flow */}
+      {/* Email + Terms + OTP Flow (สามสเต็ปใน Dialog เดียว) */}
       <Dialog
         open={openEmailFlow}
         onOpenChange={(open) => {
@@ -455,11 +467,11 @@ export default function CustomerDashboard() {
         }}
       >
         <DialogContent className="sm:max-w-lg">
-          {step === "email" ? (
+          {step === "email" && (
             <>
               <DialogHeader>
                 <DialogTitle>ยืนยันอีเมล</DialogTitle>
-                <DialogDescription>กรอกอีเมลเพื่อรับรหัส OTP 6 หลัก</DialogDescription>
+                <DialogDescription>กรอกอีเมลเพื่อไปยังขั้น “เงื่อนไขการใช้งาน”</DialogDescription>
               </DialogHeader>
 
               <div className="grid gap-4">
@@ -467,15 +479,6 @@ export default function CustomerDashboard() {
                   <div className="flex items-center justify-between">
                     <Label htmlFor="email">อีเมล</Label>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          emailInputRef.current?.focus({ preventScroll: true });
-                          emailInputRef.current?.scrollIntoView({ block: "center" });
-                          setShowEmailKb(true);
-                        }}
-                      >โฟกัส</Button>
                       <Button variant="outline" size="sm" onClick={() => setShowEmailKb((v) => !v)}>
                         {showEmailKb ? "ซ่อนแป้นพิมพ์" : "แสดงแป้นพิมพ์"}
                       </Button>
@@ -485,8 +488,8 @@ export default function CustomerDashboard() {
                   <Input
                     id="email"
                     ref={emailInputRef}
-                    type="text"           // ใช้ text เพื่อ setSelectionRange ได้
-                    inputMode="email"     // ช่วยคีย์บอร์ดมือถือโทนอีเมล
+                    type="text"
+                    inputMode="email"
                     autoComplete="email"
                     enterKeyHint="go"
                     placeholder="you@example.com"
@@ -501,32 +504,15 @@ export default function CustomerDashboard() {
                     <p className="text-xs text-red-600">รูปแบบอีเมลไม่ถูกต้อง</p>
                   )}
 
-                  {/* INLINE EMAIL KEYBOARD */}
                   <InlineEmailKeyboard
                     visible={showEmailKb}
                     setValue={setEmail}
                     onDone={() => {
-                      // ซ่อน + กัน onFocus เปิดซ้ำชั่วคราว
                       emailKbSuppressRef.current = true;
                       setShowEmailKb(false);
                       setTimeout(() => { emailKbSuppressRef.current = false; }, 400);
-                      // ไม่ refocus input เพื่อไม่ให้เปิดซ้ำ
                     }}
                   />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>เงื่อนไขการใช้งาน</Label>
-                  <ScrollArea className="h-40 rounded-md border p-3 text-sm leading-6">
-                    <p>• ระบบจะส่งรหัส OTP ไปยังอีเมลของคุณเพื่อยืนยันตัวตน…</p>
-                    <p className="mt-2">• ลิงก์แชร์รูปภาพจะถูกสร้างจากบัญชี Nextcloud…</p>
-                    <p className="mt-2">• โปรดเก็บรักษารหัส OTP และลิงก์แชร์เป็นความลับ…</p>
-                    <p className="mt-2">• รายละเอียดฉบับเต็มโปรดดูนโยบายความเป็นส่วนตัวของเรา…</p>
-                  </ScrollArea>
-                  <div className="flex items-start gap-2 pt-2">
-                    <Checkbox id="consent" checked={consent} onCheckedChange={(v) => setConsent(Boolean(v))} />
-                    <Label htmlFor="consent" className="text-sm leading-6">ฉันได้อ่านและยินยอมตามเงื่อนไขการใช้งาน</Label>
-                  </div>
                 </div>
 
                 {flowError && <div className="text-sm text-red-600">{flowError}</div>}
@@ -534,12 +520,63 @@ export default function CustomerDashboard() {
 
               <DialogFooter className="mt-2">
                 <Button variant="outline" onClick={() => setOpenEmailFlow(false)}>ยกเลิก</Button>
-                <Button onClick={handleSendOtp} disabled={!emailValid || !consent || sending}>
+                <Button onClick={handleGoTerms} disabled={!emailValid}>ถัดไป</Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {step === "terms" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>เงื่อนไขการใช้งาน</DialogTitle>
+                <DialogDescription>โปรดอ่านและยอมรับก่อนรับรหัส OTP</DialogDescription>
+              </DialogHeader>
+
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <ScrollArea className="h-44 rounded-md border p-3 text-sm leading-6">
+                    <ul className="list-disc pl-5 space-y-2">
+                     <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
+                      <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
+                      <li>เมื่อยืนยันสำเร็จ อาจมีการสร้าง <strong>ลิงก์แชร์ (Nextcloud)</strong> สำหรับดูหรือดาวน์โหลดรูป</li>
+                      <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัย</li>
+                      <li>ระบบจะเก็บข้อมูลการใช้งานบางส่วน เพื่อความปลอดภัย ตาม <strong>นโยบายความเป็นส่วนตัว</strong></li>
+                      <li>คุณมีสิทธิ์ในการ <strong>ขอแก้ไข หรือลบข้อมูล</strong> ตามที่กฎหมายกำหนด</li>
+                      <li>การดำเนินการต่อ ถือว่าคุณได้ <strong>ยอมรับเงื่อนไขและนโยบายความเป็นส่วนตัว</strong> แล้ว</li>
+                    </ul>
+                  </ScrollArea>
+
+                  <div className="flex items-start gap-2 pt-2">
+                    <Checkbox id="consent" checked={consent} onCheckedChange={(v) => setConsent(Boolean(v))} />
+                    <Label htmlFor="consent" className="text-sm leading-6">
+                      ฉันได้อ่านและยอมรับเงื่อนไขการใช้งานและนโยบายความเป็นส่วนตัว
+                    </Label>
+                  </div>
+                </div>
+
+                {flowError && <div className="text-sm text-red-600">{flowError}</div>}
+              </div>
+
+              <DialogFooter className="mt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setStep("email");
+                    setFlowError(null);
+                    setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
+                    setShowEmailKb(true);
+                  }}
+                >
+                  กลับ
+                </Button>
+                <Button onClick={handleSendOtp} disabled={!consent || sending}>
                   {sending ? (<><Loader size={16} className="mr-2" />กำลังส่ง…</>) : ("ถัดไป")}
                 </Button>
               </DialogFooter>
             </>
-          ) : (
+          )}
+
+          {step === "otp" && (
             <>
               <DialogHeader>
                 <DialogTitle>ใส่รหัส OTP</DialogTitle>
@@ -556,10 +593,6 @@ export default function CustomerDashboard() {
                   <div className="flex items-center justify-between">
                     <Label htmlFor="otp">รหัส OTP 6 หลัก</Label>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline" size="sm"
-                        onClick={() => { otpFirstSlotRef.current?.focus({ preventScroll: true }); setShowOtpKb(true); }}
-                      >โฟกัส</Button>
                       <Button variant="outline" size="sm" onClick={() => setShowOtpKb((v) => !v)}>
                         {showOtpKb ? "ซ่อนแป้นพิมพ์" : "แสดงแป้นพิมพ์"}
                       </Button>
@@ -589,7 +622,6 @@ export default function CustomerDashboard() {
 
                   {!otpValid && otp.length > 0 && <p className="text-xs text-red-600">ต้องเป็นตัวเลข 6 หลัก</p>}
 
-                  {/* INLINE OTP KEYPAD */}
                   <InlineOtpKeypad
                     visible={showOtpKb}
                     setValue={setOtp}
@@ -614,12 +646,13 @@ export default function CustomerDashboard() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setStep("email"); setOtp(""); setFlowError(null);
+                    setStep("terms");
+                    setFlowError(null);
                     setShowOtpKb(false);
-                    setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
-                    setShowEmailKb(true);
                   }}
-                >กลับ</Button>
+                >
+                  กลับ
+                </Button>
                 <Button onClick={handleVerifyOtp} disabled={!otpValid || sending}>
                   {sending ? (<><Loader size={16} className="mr-2" />กำลังยืนยัน…</>) : ("ยืนยันรหัส")}
                 </Button>
