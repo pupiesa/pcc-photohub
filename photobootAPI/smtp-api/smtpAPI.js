@@ -105,18 +105,6 @@ app.post('/email/verify/request', async (req, res) => {
     try {
       await sendMail({
         to: email,
-        from: { name: "PCC PhotoHub"},
-        envelope: {
-          from: "bounce@yourdomain.com",
-          to: email
-        },
-        headers: {
-          "Auto-Submitted": "auto-generated",
-          "Precedence": "bulk",
-          "X-Auto-Response-Suppress": "All",
-          "List-Post": "NO",
-          "X-No-Reply": "true"
-        },
         subject: `Your verification code: ${otp}`,
         text: `Your verification code is ${otp}. It expires in ${OTP_TTL_MIN} minutes.`,
         html: `
