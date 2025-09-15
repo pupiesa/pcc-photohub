@@ -14,6 +14,7 @@ const WARP_CONFIG = { perspective: 150, beamsPerSide: 4, beamSize: 5, beamDurati
 
 const MONGO_BASE = process.env.NEXT_PUBLIC_MONGO_BASE || "";
 const NC_BASE    = process.env.NEXT_PUBLIC_NC_BASE || "";
+const CAMERA_BASE = process.env.NEXT_PUBLIC_CAMERA_BASE || "";
 
 const RETRY_MS = 30000;
 const PROG_TICK = 100;
@@ -91,6 +92,7 @@ export default function BoothPage() {
       const bad = [];
       const okMongo = await ping(MONGO_BASE); if (!okMongo) bad.push("DATABASE");
       const okNc    = await ping(NC_BASE);    if (!okNc) bad.push("CLOUD");
+      const okCam   = await ping(CAMERA_BASE, "/", 2500); if (!okCam) bad.push("CAMERA");
       if (!mounted) return;
       if (bad.length > 0) { setIsOffline(true); setDownList(bad); showNotice(`Cannot reach: ${bad.join(", ")}`, "warn", true); }
       else { if (isOffline) { setIsOffline(false); setDownList([]); clearNotice(); showNotice("Back online", "success", false, 3000); } }
@@ -99,7 +101,7 @@ export default function BoothPage() {
     intervalId = setInterval(checkApis, RETRY_MS);
     return () => { mounted = false; if (intervalId) clearInterval(intervalId); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [MONGO_BASE, NC_BASE, isOffline]);
+  }, [MONGO_BASE, NC_BASE, CAMERA_BASE, isOffline]);
 
   // ---------- Actions ----------
   const handleStartClick = () => setCurrentView("login");
