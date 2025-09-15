@@ -129,7 +129,7 @@ function InlineEmailKeyboard({ visible, setValue, onDone }) {
         ))}
         <div className="flex gap-1 justify-center">
           <Button variant="secondary" onClick={() => press("@gmail.com")}>@gmail.com</Button>
-          <Button variant="secondary" onClick={() => press(".ac.th")}>.ac.th</Button>
+          <Button variant="secondary" onClick={() => press("@kmitl.ac.th")}>@kmitl.ac.th</Button>
           <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
           <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
         </div>
