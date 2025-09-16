@@ -11,6 +11,7 @@
     "nextcloud": "node --env-file=.env photobootAPI/nextcloud-api/nextcloudAPI.js",
     "smtp": "node --env-file=.env photobootAPI/smtp-api/smtpAPI.js",
     "dev": "node dev-supervisor.mjs",
+    "server": "node dev-server-supervisor.mjs",
     "install:all": "npm --prefix ./photobootAPI/mongo-api i && npm --prefix ./photobootAPI/nextcloud-api i && npm --prefix ./photobootAPI/smtp-api i"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
+// components/ForgotPinDialog.js
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { client } from "@/lib/photoboothClient";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
 /* ---------- Inline Soft Keyboard (ตัวเลข/OTP) ---------- */
@@ -43,17 +45,12 @@ function InlineOtpKeypad({ visible, setValue, onDone, maxLen = 6 }) {
   );
 }
 
-/** ForgotPinDialog
- * props:
- *  - open, onOpenChange
- *  - phone: หมายเลขโทรศัพท์ของผู้ใช้ (จำเป็น)
- *  - afterReset(newPin): callback เมื่อรีเซ็ต PIN เสร็จ
- *
- * โฟล: email (readonly) -> otp -> pin1 -> pin2
- */
+const OTP_TOTAL_SECS = 80;
+
+/** ForgotPinDialog */
 export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset }) {
   const [step, setStep] = useState("email");      // 'email' | 'otp' | 'pin1' | 'pin2'
-  const [email, setEmail] = useState("");         // ดึงจาก DB และ lock readOnly
+  const [email, setEmail] = useState("");
   const [hasEmail, setHasEmail] = useState(false);
 
   const [otp, setOtp] = useState("");
@@ -68,6 +65,23 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
   const [showPin2Kb, setShowPin2Kb] = useState(false);
 
   const otpFirstSlotRef = useRef(null);
+
+  // จับเวลา OTP
+  const [secsLeft, setSecsLeft] = useState(0);
+  useEffect(() => {
+    if (step === "otp") {
+      setSecsLeft(OTP_TOTAL_SECS);
+      const id = setInterval(() => setSecsLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+      return () => clearInterval(id);
+    }
+  }, [step]);
+
+  const progress = useMemo(() => {
+    return Math.max(0, Math.min(100, (secsLeft / OTP_TOTAL_SECS) * 100));
+  }, [secsLeft]);
+  const isUrgent = secsLeft > 0 && secsLeft <= 25;
+  const mm = String(Math.floor(secsLeft / 60)).padStart(2, "0");
+  const ss = String(secsLeft % 60).padStart(2, "0");
 
   // โหลดอีเมลทุกครั้งที่เปิด
   useEffect(() => {
@@ -101,7 +115,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
     }
     setLoading(true);
     try {
-     await client.requestEmailOTP({ number: phone, email, heading: 'Verify your PIN change' });
+      await client.requestEmailOTP({ number: phone, email, heading: 'Verify your PIN change' });
       toast.success("ส่งรหัส OTP ไปที่อีเมลแล้ว");
       setStep("otp");
       setTimeout(() => {
@@ -110,19 +124,30 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
       }, 50);
     } catch (e) {
       toast.error(`ส่ง OTP ไม่สำเร็จ: ${e?.message || e}`);
-    } finally {
-      setLoading(false);
+    } finally { setLoading(false); }
+  };
+
+  const resendOtp = async () => {
+    if (!email) return;
+    try {
+      await client.requestEmailOTP({ number: phone, email, heading: 'Verify your PIN change' });
+      toast.success("ส่งรหัส OTP ใหม่แล้ว");
+      setOtp("");
+      setSecsLeft(OTP_TOTAL_SECS);
+    } catch (e) {
+      toast.error(`ส่ง OTP ไม่สำเร็จ: ${e?.message || e}`);
     }
   };
 
   const verifyOtp = async () => {
     if (otp.length !== 6) { toast.error("กรุณากรอก OTP 6 หลัก"); return; }
+    if (secsLeft === 0) { toast.error("OTP หมดเวลาแล้ว"); return; }
     setLoading(true);
     try {
       await client.confirmEmailOTP({ number: phone, email, otp });
       toast.success("ยืนยัน OTP สำเร็จ");
       setShowOtpKb(false);
-      setStep("pin1");          // → สเต็ป รหัสครั้งที่ 1
+      setStep("pin1");
       setShowPin1Kb(true);
     } catch (e) {
       toast.error(`OTP ไม่ถูกต้อง: ${e?.message || e}`);
@@ -135,7 +160,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
       return;
     }
     setShowPin1Kb(false);
-    setStep("pin2");            // → สเต็ป รหัสครั้งที่ 2 (ยืนยัน)
+    setStep("pin2");
     setShowPin2Kb(true);
   };
 
@@ -144,7 +169,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
     if (pin1 !== pin2) { toast.error("PIN ทั้งสองครั้งไม่ตรงกัน"); return; }
     setLoading(true);
     try {
-      await client.changePin(phone, pin2); // เปลี่ยน PIN จริง
+      await client.changePin(phone, pin2);
       toast.success("ตั้ง PIN ใหม่สำเร็จ");
       onOpenChange(false);
       afterReset?.(pin2);
@@ -153,7 +178,6 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
     } finally { setLoading(false); }
   };
 
-  // บล็อกตั้งแต่หน้าแรกถ้าไม่มีอีเมล
   const noEmailBlocked = step === "email" && (!hasEmail || !email);
 
   return (
@@ -161,11 +185,10 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle>ลืม PIN</DialogTitle>
-          <DialogDescription>
-          </DialogDescription>
+          <DialogDescription></DialogDescription>
         </DialogHeader>
 
-        {/* STEP: EMAIL (READONLY) */}
+        {/* STEP: EMAIL */}
         {step === "email" && (
           <div className="space-y-3">
             <Label htmlFor="email">อีเมลลูกค้า</Label>
@@ -182,10 +205,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
               <div className="text-sm text-rose-600">
                 ยังไม่ได้ยืนยันอีเมล จึง <b>ไม่มีสิทธิเปลี่ยน PIN</b>
               </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">
-              </div>
-            )}
+            ) : null}
             <DialogFooter>
               <Button onClick={goToOtp} disabled={loading || noEmailBlocked}>
                 {loading ? (<><Loader className="mr-2" />กำลังส่ง</>) : "ส่ง OTP"}
@@ -205,6 +225,33 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
                 </InputOTPGroup>
               </InputOTP>
             </div>
+
+            {/*Progress*/}
+            <div className="space-y-1 mt-3">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>เวลาที่เหลือ</span>
+                <span className="tabular-nums">{mm}:{ss}</span>
+              </div>
+              <Progress
+                value={progress}
+                className={[
+                  "h-2 rounded-full",
+                  secsLeft === 0
+                    ? "[&>div]:bg-gray-400"
+                    : isUrgent
+                      ? "[&>div]:bg-red-500 [&>div]:animate-pulse"
+                      : "[&>div]:bg-blue-600",
+                ].join(" ")}
+              />
+              {secsLeft === 0 && (
+                <div className="text-right">
+                  <Button variant="outline" size="sm" onClick={resendOtp}>
+                    ส่งรหัสใหม่
+                  </Button>
+                </div>
+              )}
+            </div>
+
             <div className="mt-2">
               <Button variant="outline" onClick={() => setShowOtpKb((s)=>!s)}>
                 {showOtpKb ? "ซ่อนแป้นพิมพ์" : "แสดงแป้นพิมพ์จำลอง"}
@@ -212,7 +259,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
             </div>
             <InlineOtpKeypad visible={showOtpKb} setValue={setOtp} onDone={() => setShowOtpKb(false)} />
             <DialogFooter>
-              <Button onClick={verifyOtp} disabled={loading || otp.length !== 6}>
+              <Button onClick={verifyOtp} disabled={loading || otp.length !== 6 || secsLeft === 0}>
                 {loading ? (<><Loader className="mr-2" />กำลังตรวจสอบ</>) : "ยืนยัน OTP"}
               </Button>
             </DialogFooter>
@@ -250,7 +297,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
           </div>
         )}
 
-        {/* STEP: PIN2 (CONFIRM) */}
+        {/* STEP: PIN2 */}
         {step === "pin2" && (
           <div className="space-y-4">
             <Card>
