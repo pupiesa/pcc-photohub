@@ -7,6 +7,7 @@ import { client } from "@/lib/photoboothClient";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 const CAMERA_BASE = (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
@@ -17,18 +18,28 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   const [countdown, setCountdown] = useState(null);
   const [photosTaken, setPhotosTaken] = useState(0);
-  const [capturedImage, setCapturedImage] = useState(null);           // preview รูปล่าสุด
-  const [capturedServerPath, setCapturedServerPath] = useState(null); // path ฝั่ง Pi
-  const [sessionPaths, setSessionPaths] = useState([]);               // เก็บครบ 2 ใบ
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [capturedServerPath, setCapturedServerPath] = useState(null);
+  const [sessionPaths, setSessionPaths] = useState([]);
   const [busy, setBusy] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+
+  // ดีเลย์ปุ่ม 5 วิ
+  const [buttonsReady, setButtonsReady] = useState(false);
+  useEffect(() => {
+    if (capturedImage) {
+      setButtonsReady(false);
+      const t = setTimeout(() => setButtonsReady(true), 5000);
+      return () => clearTimeout(t);
+    }
+    setButtonsReady(false);
+  }, [capturedImage]);
 
   // live preview
   const [liveSrc, setLiveSrc] = useState(null);
   const [liveLoading, setLiveLoading] = useState(true);
   const liveImgRef = useRef(null);
 
-  // ---------- helper: สั่งหยุดกล้อง ----------
   const stopCamera = async () => {
     if (!CAMERA_BASE) return;
     try {
@@ -39,25 +50,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
     } catch {}
   };
 
-  // ---------- เริ่ม live เฉพาะหน้า /booth ----------
   useEffect(() => {
-    if (!CAMERA_BASE) return;
-    if (pathname !== "/booth") return;
-
+    if (!CAMERA_BASE || pathname !== "/booth") return;
     setLiveLoading(true);
     setLiveSrc(`${CAMERA_BASE}/video_feed?ts=${Date.now()}`);
-
-    // ออกจากหน้า /booth หรือ component ถูก unmount → หยุดกล้อง
     return () => {
       if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
       setLiveSrc(null);
       setLiveLoading(true);
       stopCamera();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // ---------- 3-2-1 ถ่าย ----------
   const startPhotoshoot = () => {
     let count = 3;
     setCountdown(count);
@@ -72,18 +76,14 @@ export default function PhotoboothInterface({ user, onLogout }) {
     }, 1000);
   };
 
-  // ---------- สั่งกล้องถ่าย ----------
   const handleCapture = async () => {
     try {
       if (!CAMERA_BASE) throw new Error("CAMERA_BASE not set");
-      const res = await fetch(`${CAMERA_BASE}/capture`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
+      const res = await fetch(`${CAMERA_BASE}/capture`, { method: "POST", headers: { "Content-Type": "application/json" } });
       if (!res.ok) throw new Error((await res.text()) || `Capture failed: ${res.status}`);
-      const data = await res.json(); // { url, serverPath }
+      const data = await res.json();
       const url = data?.url;
-      if (!url) throw new Error("No image url returned from /capture");
+      if (!url) throw new Error("No image url returned");
       setCapturedImage(`${CAMERA_BASE}${url}?ts=${Date.now()}`);
       setCapturedServerPath(data?.serverPath || null);
     } catch (err) {
@@ -92,27 +92,21 @@ export default function PhotoboothInterface({ user, onLogout }) {
     }
   };
 
-  // ---------- อัปโหลดทั้งหมด & redirect (ไม่เปลี่ยนชื่อไฟล์) ----------
   const uploadBatchAndGo = async (paths) => {
     const number = user?.phone || user?.number;
     if (!number || !paths.length) return;
 
     const remotes = [];
-
-    // ใบแรก: upload-and-share
     const up1 = await client.uploadAndShare({ folderName: number, filePath: paths[0] });
     if (up1?.share?.url) await client.setNextcloudLink(number, up1.share.url);
     if (up1?.uploaded?.remotePath) remotes.push(up1.uploaded.remotePath);
 
-    // ใบที่เหลือ: upload-only
     for (let i = 1; i < paths.length; i++) {
       const r = await client.uploadOnly({ folderName: number, filePath: paths[i] });
       if (r?.uploaded?.remotePath) remotes.push(r.uploaded.remotePath);
     }
-
     if (remotes.length) await client.appendFileAddress(number, remotes);
 
-    // กันพลาด: ตัด src ของ live แล้วหยุดกล้องก่อนออก
     if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
     setLiveSrc(null);
     await stopCamera().catch(() => {});
@@ -121,18 +115,14 @@ export default function PhotoboothInterface({ user, onLogout }) {
     router.push("/dashboard");
   };
 
-  // ---------- ยืนยันรูป ----------
   const handleConfirmCapture = async () => {
     try {
       setBusy(true);
-
       const nextPaths = capturedServerPath ? [...sessionPaths, capturedServerPath] : [...sessionPaths];
       const nextCount = photosTaken + 1;
 
-      // เคลียร์ภาพ preview ที่โชว์อยู่
       setCapturedImage(null);
       setCapturedServerPath(null);
-
       setSessionPaths(nextPaths);
       setPhotosTaken(nextCount);
 
@@ -144,7 +134,6 @@ export default function PhotoboothInterface({ user, onLogout }) {
         return;
       }
 
-      // รูปที่ 1: กลับไป live ต่อเพื่อถ่ายใบที่ 2
       if (CAMERA_BASE) {
         const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => null);
         let nextLive = `${CAMERA_BASE}/video_feed?ts=${Date.now()}`;
@@ -167,11 +156,11 @@ export default function PhotoboothInterface({ user, onLogout }) {
     setCapturedImage(null);
     setCapturedServerPath(null);
     setCountdown(null);
-    // live ยังทำงานอยู่ ไม่ต้องสั่งเพิ่ม
+    setLiveLoading(true);
   };
 
   return (
-    <Card className="w-96 h-[600px]">
+    <Card className="w-96 h-[600px] relative">
       <CardContent className="flex flex-col gap-4 p-6 h-full">
         <div className="flex justify-between items-center">
           <CardTitle className="text-xl">Welcome!</CardTitle>
@@ -183,7 +172,6 @@ export default function PhotoboothInterface({ user, onLogout }) {
         <CardDescription>Phone: {user?.phone || user?.number || "-"}</CardDescription>
 
         <div className="flex-1 flex flex-col justify-center items-center gap-6">
-          {/* กล่องแสดงผล */}
           <div className="w-full h-64 bg-black rounded-lg overflow-hidden relative">
             {!capturedImage && (liveLoading || !liveSrc) && (
               <div className="absolute inset-0 grid place-items-center text-white/80">
@@ -204,11 +192,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
                   onLoad={() => setLiveLoading(false)}
                   onError={() => setLiveLoading(false)}
                 />
-              ) : (
-                <div className="w-full h-full grid place-items-center text-white/70 text-sm p-4 text-center">
-                  {CAMERA_BASE ? (<><Loader /><div className="mt-2">Starting live preview…</div></>) : "Camera base URL not set"}
-                </div>
-              )
+              ) : null
             ) : (
               <img src={capturedImage} alt="Captured" className="w-full h-full object-cover" />
             )}
@@ -218,16 +202,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
             <div className="w-full space-y-3">
               <Button
                 onClick={handleConfirmCapture}
-                className="w-full h-12 text-xl font-bold"
-                disabled={busy || redirecting}
+                className={`w-full h-12 text-xl font-bold ${
+                  buttonsReady ? "bg-white text-gray-900 hover:bg-gray-50" : "bg-gray-300 text-gray-600 cursor-not-allowed"
+                }`}
+                disabled={busy || redirecting || !buttonsReady}
               >
                 {busy ? "Processing…" : "Confirm Image"}
               </Button>
               <Button
                 variant="outline"
                 onClick={handleRetake}
-                className="w-full h-12"
-                disabled={busy || redirecting}
+                className={`w-full h-12 ${buttonsReady ? "" : "bg-gray-200 text-gray-500 cursor-not-allowed"}`}
+                disabled={busy || redirecting || !buttonsReady}
               >
                 Retake Photo
               </Button>
@@ -250,14 +236,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
                   >
                     Take Photo {photosTaken + 1}
                   </Button>
-                ) : (
-                  <div className="flex flex-col items-center gap-3 text-center">
-                    <div className="text-green-600 font-bold text-xl">
-                      ✅ Session Complete! {redirecting ? "Redirecting…" : ""}
-                    </div>
-                    <Loader />
-                  </div>
-                )}
+                ) : null}
               </div>
             </>
           )}
@@ -267,6 +246,22 @@ export default function PhotoboothInterface({ user, onLogout }) {
           Session: ฿50 • {MAX_PHOTOS} photos included
         </div>
       </CardContent>
+
+      {/* Overlay shadcn Dialog */}
+      <Dialog open={photosTaken >= MAX_PHOTOS && !redirecting}>
+        <DialogContent>
+          <DialogHeader className="text-center">
+            <div className="text-6xl mb-2">✅</div>
+            <DialogTitle>Session Complete!</DialogTitle>
+            <DialogDescription>
+              {redirecting ? "Redirecting…" : "Processing your photos..."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 flex justify-center">
+            <Loader />
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
