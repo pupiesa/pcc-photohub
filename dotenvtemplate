@@ -1,0 +1,39 @@
+# SMTP (nodemailer)
+SMTP_PORT=4000
+SMTP_USER= #mail
+SMTP_PASS= #pass
+FROM_NAME= #ProjectPhoto
+FROM_EMAIL=no-reply@yourdomain.com
+
+OTP_TTL_MIN=1
+OTP_MAX_ATTEMPTS=5
+REQUEST_COOLDOWN_SEC=60
+
+# Nextcloud (nextcloud-api)
+NEXTCLOUD_PORT=1500
+NEXTCLOUD_URI= # your_nextcloud.url
+NEXTCLOUD_Username= #ProjectPhoto
+NEXTCLOUD_Password= #your user pass
+NEXTCLOUD_webdavUrl= # your_nextcloud.url/remote.php/dav
+NEXTCLOUD_ocsApiUrl= # your_nextcloud.url/ocs/v2.php/apps/files_sharing/api/v1
+NEXTCLOUD_PREVIEW= # your_nextcloud.url/remote.php/dav/files/ProjectPhoto
+
+# Nextcloud server
+NEXTCLOUD_SERVER_PROTOCOL=http
+NEXTCLOUD_SERVER_LINK= #your_nextcloud.url
+NEXTCLOUD_SERVER_PORT= #your_nextcloud.port
+
+# Database (mongo-api)
+MONGODB_URI= #your_mongodb.url
+MONGODB_PORT=2000
+
+#CORS
+CORS_ALLOW_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:3000
+
+#API LOCAL SERVER BASE
+NEXT_PUBLIC_SMTP_BASE=http://localhost:4000
+NEXT_PUBLIC_MONGO_BASE=http://localhost:2000
+NEXT_PUBLIC_NC_BASE=http://localhost:1500
+
+
+NEXT_PUBLIC_CAMERA_BASE=http://127.0.0.1:8080
