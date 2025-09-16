@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-# server_webcam.py — Webcam control on Raspberry Pi / PC (Flask + OpenCV)
+# webcam_server.py — Webcam control on Raspberry Pi / macOS / Linux (Flask + OpenCV)
 # Features:
+# - User chooses camera device before starting
 # - Live preview via /video_feed (MJPEG, no-cache)
-# - Select camera index via /set_camera
-# - Robust capture via /capture (JPEG)
-# - Confirm via /confirm to clear captured state and return to live
-# - Serve last file via /captured_images/<name> or /download
+# - Capture single frame via /capture
+# - Confirm to return to live via /confirm
+# - Serve last captured image via /captured_images/<name> or /download
 # Notes:
-#   pip install flask flask-cors opencv-python numpy pillow imageio
+#   pip install flask flask-cors opencv-python numpy
 
 import os
 import sys
 import time
-import signal
 import threading
 from datetime import datetime
 
 import cv2
+import numpy as np
 from flask import Flask, Response, request, send_file, send_from_directory, jsonify
 from flask_cors import CORS
 
 # ------------------------------------------------------------
 # Flask app & CORS
 # ------------------------------------------------------------
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
-
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://127.0.0.1:3000")
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": FRONTEND_ORIGIN}})
 
@@ -34,15 +33,14 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 # ------------------------------------------------------------
 # Global state
 # ------------------------------------------------------------
-selected_camera = 0        # default webcam index
-latest_frame = None        # bytes (JPEG; for MJPEG stream)
-captured_image = None      # bytes (for /download)
-captured_filename = None   # str (path on disk)
-mode = "live"              # "live" or "captured" (informational)
-running = False            # capture thread control
+selected_device_index = None  # int, OpenCV video device
+latest_frame = None           # bytes (JPEG)
+captured_image = None         # bytes
+captured_filename = None      # str (path)
+mode = "live"                 # "live" or "captured"
+running = False               # capture thread control
 lock = threading.Lock()
 capture_thread = None
-cap = None                 # OpenCV VideoCapture object
 
 # ------------------------------------------------------------
 # Utilities
@@ -53,72 +51,57 @@ def _nocache_headers(resp):
     resp.headers["Expires"] = "0"
     return resp
 
-def _init_camera(index):
-    global cap
-    if cap:
-        cap.release()
-    cap = cv2.VideoCapture(index)
-    if not cap.isOpened():
-        print(f"[ERROR] Cannot open camera {index}")
-        cap = None
-    return cap
+def list_cameras(max_index=5):
+    """Return list of available camera device indices."""
+    available = []
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            available.append(i)
+            cap.release()
+    return available
 
-def safe_capture_one():
-    """Captures one frame from webcam and saves as JPEG"""
-    global cap
-    if not cap:
-        _init_camera(selected_camera)
-        if not cap:
-            raise RuntimeError("Camera not available")
-    ret, frame = cap.read()
-    if not ret or frame is None:
-        raise RuntimeError("Failed to capture frame")
+def start_capture_thread():
+    global running, capture_thread, mode
+    running = True
+    mode = "live"
+    capture_thread = threading.Thread(target=capture_loop, daemon=True)
+    capture_thread.start()
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    host_filename = f"capture_{ts}.jpg"
-    host_filepath = os.path.join(SAVE_DIR, host_filename)
-    cv2.imwrite(host_filepath, frame)
-
-    return host_filepath, frame
+def stop_capture_thread():
+    global running, capture_thread
+    if capture_thread and capture_thread.is_alive():
+        running = False
+        capture_thread.join(timeout=2)
+    capture_thread = None
 
 # ------------------------------------------------------------
-# Live capture thread (preview loop)
+# Live capture loop
 # ------------------------------------------------------------
 def capture_loop():
-    """Continuously update latest_frame from webcam"""
-    global latest_frame, mode, running, cap
-
-    _init_camera(selected_camera)
+    global latest_frame, running, selected_device_index, mode
+    cap = cv2.VideoCapture(selected_device_index)
+    if not cap.isOpened():
+        print(f"[ERROR] Cannot open camera {selected_device_index}")
+        return
 
     while running:
-        try:
-            if not cap:
-                time.sleep(0.2)
-                _init_camera(selected_camera)
-                continue
-
-            if mode == "live":
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    ret2, buffer = cv2.imencode('.jpg', frame)
-                    if ret2:
-                        with lock:
-                            latest_frame = buffer.tobytes()
-                else:
-                    time.sleep(0.05)
+        if mode == "live":
+            ret, frame = cap.read()
+            if ret:
+                ret2, buffer = cv2.imencode('.jpg', frame)
+                if ret2:
+                    with lock:
+                        latest_frame = buffer.tobytes()
             else:
                 time.sleep(0.05)
-        except Exception as e:
-            print(f"[WARN] Camera error: {e}")
-            time.sleep(0.5)
+        else:
+            time.sleep(0.05)
 
-    if cap:
-        cap.release()
-        cap = None
+    cap.release()
     print("[INFO] capture_loop stopped")
 
 def generate_frames():
-    """Yield latest_frame as multipart/x-mixed-replace JPEG stream."""
     global latest_frame
     while True:
         with lock:
@@ -129,89 +112,52 @@ def generate_frames():
         else:
             time.sleep(0.05)
 
-def stop_capture_thread():
-    global running, capture_thread
-    if capture_thread and capture_thread.is_alive():
-        running = False
-        capture_thread.join(timeout=2)
-    capture_thread = None
-
-def start_capture_thread():
-    global running, capture_thread, mode
-    mode = "live"
-    running = True
-    capture_thread = threading.Thread(target=capture_loop, daemon=True)
-    capture_thread.start()
-
 # ------------------------------------------------------------
 # Routes
 # ------------------------------------------------------------
-@app.route('/set_camera', methods=['POST'])
-def set_camera():
-    """Select a specific webcam index"""
-    global selected_camera
-    idx = request.form.get('camera_index')
-    if idx is not None:
-        selected_camera = int(idx)
-    print(f"[INFO] Switching camera to index {selected_camera}")
-    stop_capture_thread()
-    start_capture_thread()
-    return "OK", 200
-
 @app.route('/capture', methods=['POST'])
 def capture():
-    global mode, captured_image, captured_filename, latest_frame
-
+    global captured_image, captured_filename, latest_frame, mode
     stop_capture_thread()
-    try:
-        host_filepath, frame = safe_capture_one()
-
-        # Keep bytes and filename for /download
-        _, buffer = cv2.imencode('.jpg', frame)
-        captured_image = buffer.tobytes()
-        captured_filename = host_filepath
-
-        # Update latest_frame for MJPEG stream
-        with lock:
-            latest_frame = captured_image
-
-        mode = "captured"
-        rel_url = f"/{os.path.join(SAVE_DIR, os.path.basename(host_filepath))}"
-        return jsonify({"url": rel_url}), 200
-
-    except Exception as e:
-        print(f"[ERROR] capture failed: {e}")
-        return f"Capture failed: {e}", 500
-    finally:
+    cap = cv2.VideoCapture(selected_device_index)
+    if not cap.isOpened():
         start_capture_thread()
+        return "Camera not available", 503
+
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        start_capture_thread()
+        return "Capture failed", 500
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    host_filename = f"capture_{ts}.jpg"
+    host_filepath = os.path.join(SAVE_DIR, host_filename)
+    cv2.imwrite(host_filepath, frame)
+
+    with open(host_filepath, 'rb') as f:
+        captured_image = f.read()
+    captured_filename = host_filepath
+
+    with lock:
+        latest_frame = captured_image
+
+    mode = "captured"
+    start_capture_thread()
+    return jsonify({"url": f"/{SAVE_DIR}/{host_filename}"}), 200
 
 @app.route('/confirm', methods=['POST'])
 def confirm():
-    """User confirms captured photo, return to live mode"""
-    global mode, captured_image, captured_filename, latest_frame
+    global captured_image, captured_filename, mode, latest_frame
     captured_image = None
     captured_filename = None
     mode = "live"
-
     stop_capture_thread()
     with lock:
         latest_frame = None
     start_capture_thread()
-
     ts = int(time.time() * 1000)
     return jsonify({"video": f"/video_feed?ts={ts}"}), 200
-
-@app.route('/return_live', methods=['POST'])
-def return_live():
-    global mode, captured_image, captured_filename, latest_frame
-    captured_image = None
-    captured_filename = None
-    mode = "live"
-    stop_capture_thread()
-    with lock:
-        latest_frame = None
-    start_capture_thread()
-    return "Live", 200
 
 @app.route('/video_feed')
 def video_feed():
@@ -237,10 +183,25 @@ def download_image():
         return _nocache_headers(resp)
     else:
         return "No image captured", 404
+    
+@app.route("/stop_stream", methods=["POST"])
+def stop_stream():
+    # your stop logic here
+    return jsonify({"status": "stopped"})
+
+@app.route("/stop", methods=["POST"])
+def stop():
+    # optional stop logic
+    return jsonify({"status": "stopped"})
+    
+@app.route('/')
+def index():
+    return "i am okay"
 
 # ------------------------------------------------------------
 # Graceful shutdown
 # ------------------------------------------------------------
+import signal
 def cleanup(sig, frame):
     print("\n[INFO] Shutting down server...")
     stop_capture_thread()
@@ -253,6 +214,26 @@ signal.signal(signal.SIGTERM, cleanup)
 # Main
 # ------------------------------------------------------------
 if __name__ == '__main__':
+    print("[INFO] Detecting available cameras...")
+    cams = list_cameras(5)
+    if not cams:
+        print("[ERROR] No camera detected!")
+        sys.exit(1)
+
+    print("[INFO] Available cameras:")
+    for i, idx in enumerate(cams):
+        print(f"  [{i}] Device {idx}")
+
+    choice = input(f"Select camera [0-{len(cams)-1}]: ")
+    try:
+        choice = int(choice)
+        if choice < 0 or choice >= len(cams):
+            raise ValueError()
+        selected_device_index = cams[choice]
+    except ValueError:
+        print("[ERROR] Invalid selection")
+        sys.exit(1)
+
+    print(f"[INFO] Using camera device {selected_device_index}")
     start_capture_thread()
     app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False)
-
