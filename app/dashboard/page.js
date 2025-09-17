@@ -1,6 +1,7 @@
+// app/dashboard/page.js
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import QRCode from "react-qr-code";
@@ -26,6 +27,7 @@ import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradien
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const NC_BASE = process.env.NEXT_PUBLIC_NC_BASE || "/ncapi";
 const OTP_TOTAL_SECS = 80;
+const INACTIVITY_MS = 120_000; // 2 นาที
 
 const buildProxyPreview = (relPath) =>
   `${(NC_BASE || "").replace(/\/$/, "")}/api/nextcloud/preview?path=${encodeURIComponent(relPath)}`;
@@ -70,7 +72,7 @@ function ProxyPreview({ item }) {
   );
 }
 
-/* ---------- Inline Soft Keyboards ---------- */
+/* ---------- Inline Keyboards ---------- */
 function InlineOtpKeypad({ visible, setValue, onDone }) {
   if (!visible) return null;
   const keys = ["1","2","3","4","5","6","7","8","9","0"];
@@ -165,12 +167,11 @@ export default function CustomerDashboard() {
   const [otpSecsLeft, setOtpSecsLeft] = useState(OTP_TOTAL_SECS);
   const [canResend, setCanResend] = useState(false);
   const [otpTimerKey, setOtpTimerKey] = useState(0);
+  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25; //progress bar  25 sec blink red color
 
-  // soft keyboard visibility
+  // soft keyboards
   const [showEmailKb, setShowEmailKb] = useState(false);
   const [showOtpKb, setShowOtpKb] = useState(false);
-
-  // suppress onFocus auto-open after "Done"
   const emailKbSuppressRef = useRef(false);
 
   const emailInputRef = useRef(null);
@@ -211,9 +212,50 @@ export default function CustomerDashboard() {
   };
 
   useEffect(() => { if (phone) load(phone); }, [phone]);
-
   const refresh = () => phone && load(phone);
-  const logout = () => { localStorage.removeItem("pcc_user_phone"); localStorage.removeItem("pcc_user_pin"); router.push("/booth"); };
+
+  /* ---------- Auto logout + visible countdown ---------- */
+  const logout = useCallback(() => {
+    localStorage.removeItem("pcc_user_phone");
+    localStorage.removeItem("pcc_user_pin");
+    router.push("/booth");
+  }, [router]);
+
+  const deadlineRef = useRef(0);
+  const [secondsLeft, setSecondsLeft] = useState(null);
+
+  const resetIdle = useCallback(() => {
+    deadlineRef.current = Date.now() + INACTIVITY_MS;
+    setSecondsLeft(Math.ceil(INACTIVITY_MS / 1000));
+  }, []);
+
+  useEffect(() => {
+    if (!phone) return;
+
+    // Events that count as user interaction
+    const events = ["pointerdown","keydown","mousemove","wheel","touchstart","scroll"];
+    const handler = () => resetIdle();
+
+    events.forEach((ev) => window.addEventListener(ev, handler, { passive: true }));
+    resetIdle(); // start the first countdown immediately
+
+    const tick = setInterval(() => {
+      const ms = Math.max(0, deadlineRef.current - Date.now());
+      const s = Math.max(0, Math.ceil(ms / 1000));
+      setSecondsLeft(s);
+      if (s <= 0) {
+        clearInterval(tick);
+        events.forEach((ev) => window.removeEventListener(ev, handler));
+        logout();
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(tick);
+      events.forEach((ev) => window.removeEventListener(ev, handler));
+    };
+  }, [phone, logout, resetIdle]);
+
   const goBack = () => router.push("/booth");
 
   const emailValid = useMemo(() => {
@@ -223,7 +265,7 @@ export default function CustomerDashboard() {
 
   const otpValid = useMemo(() => /^\d{6}$/.test(otp.trim()), [otp]);
 
-  // focus + auto popup keyboards according to step
+  // focus + keyboards according to step
   useEffect(() => {
     if (!openEmailFlow) return;
     const t = setTimeout(() => {
@@ -245,7 +287,7 @@ export default function CustomerDashboard() {
     return () => clearTimeout(t);
   }, [openEmailFlow, step, email.length]);
 
-  // countdown
+  // otp countdown
   useEffect(() => {
     if (step !== "otp") return;
     setOtpSecsLeft(OTP_TOTAL_SECS);
@@ -278,7 +320,6 @@ export default function CustomerDashboard() {
     );
   };
 
-  // NEW: ไปหน้า "terms" จากหน้า email (ยังไม่ส่ง OTP ตรงนี้)
   const handleGoTerms = () => {
     if (!emailValid) return;
     setFlowError(null);
@@ -286,7 +327,6 @@ export default function CustomerDashboard() {
     setStep("terms");
   };
 
-  // ส่ง OTP จากหน้า "terms" แล้วค่อยไปหน้า OTP
   const handleSendOtp = async () => {
     if (!phone) return;
     setFlowError(null); setSending(true);
@@ -310,6 +350,19 @@ export default function CustomerDashboard() {
     } finally { setSending(false); }
   };
 
+  const createNextcloudLink = async (passwordOverride) => {
+    if (!phone) return null;
+    const linkPassword = (passwordOverride || summary.displayName?.trim() || String(phone)).replace(/\s+/g, "");
+    const res = await client.shareOnly({
+      folderName: phone, permissions: 1, publicUpload: false,
+      note: `Share for ${phone}`, linkPassword, expiration: null, forceNew: true,
+    });
+    const link = res?.share?.url || res?.url || res?.data?.url || res?.publicUrl || res?.link || null;
+    if (!link) throw new Error("สร้างลิงก์สำเร็จ แต่ไม่พบ URL สำหรับใช้งาน");
+    await client.setNextcloudLink(phone, link);
+    return link;
+  };
+
   const handleResend = async () => {
     if (!phone || !canResend) return;
     setFlowError(null); setSending(true);
@@ -325,20 +378,6 @@ export default function CustomerDashboard() {
     } finally { setSending(false); }
   };
 
-  const createNextcloudLink = async () => {
-    if (!phone) return null;
-    const folderName = (summary.displayName?.trim()) || phone;
-    const linkPassword = (summary.displayName?.trim() || String(phone)).replace(/\s+/g, "");
-    const res = await client.shareOnly({
-      folderName, permissions: 1, publicUpload: false,
-      note: `Share for ${phone}`, linkPassword, expiration: null, forceNew: true,
-    });
-    const link = res?.share?.url || res?.url || res?.data?.url || res?.publicUrl || res?.link || null;
-    if (!link) throw new Error("สร้างลิงก์สำเร็จ แต่ไม่พบ URL สำหรับใช้งาน");
-    await client.setNextcloudLink(phone, link);
-    return link;
-  };
-
   const handleVerifyOtp = async () => {
     if (!phone) return;
     setFlowError(null); setSending(true);
@@ -346,7 +385,21 @@ export default function CustomerDashboard() {
       await client.confirmEmailOTP({ number: phone, email: email.trim(), otp: otp.trim() });
       await client.setGmail(phone, email.trim());
       await client.setConsentedTrue(phone);
-      if (!summary.link) await createNextcloudLink();
+
+      const newPassword = (summary.displayName?.trim() || String(phone)).replace(/\s+/g, "");
+
+      if (summary.link) {
+        await client.changeSharePasswordForUser({
+          number: phone,
+          newPassword,
+          permissions: 1,
+          publicUpload: false,
+          note: `Protect share for ${phone}`,
+        });
+      } else {
+        await createNextcloudLink(newPassword);
+      }
+
       await load(phone);
       setOpenEmailFlow(false);
       toast.success("ยืนยันอีเมลสำเร็จ");
@@ -372,7 +425,7 @@ export default function CustomerDashboard() {
   }, [otpSecsLeft]);
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center py-8">
+    <div className="h-screen w-full overflow-hidden flex flex-col items-center py-8">
       <div className="w-full max-w-5xl px-4 flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold tracking-tight">My Gallery</h1>
         <div className="flex gap-2">
@@ -385,7 +438,7 @@ export default function CustomerDashboard() {
       </div>
 
       <div className="w-full max-w-5xl px-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* PHOTOS */}
+        {/* PHOTOS (scrollable) */}
         <Card className="md:col-span-2 order-2 md:order-1">
           <CardHeader>
             <CardTitle>Photos</CardTitle>
@@ -399,16 +452,18 @@ export default function CustomerDashboard() {
             ) : error ? (
               <div className="text-sm text-red-600">{error}</div>
             ) : gallery.length === 0 ? (
-              <div className="text-sm text-gray-500">No photos yet.</div>
+              <div className="text-sm text-gray-500">No photos</div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {gallery.map((it, idx) => (
-                  <div key={`${(it.name || it.path || "item")}-${idx}`} className="group rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700" title={it.name}>
-                    <ProxyPreview item={it} />
-                    <div className="px-2 py-1 text-xs truncate text-gray-600 dark:text-gray-300">{it.name}</div>
-                  </div>
-                ))}
-              </div>
+              <ScrollArea className="h-[46vh] pr-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {gallery.map((it, idx) => (
+                    <div key={`${(it.name || it.path || "item")}-${idx}`} className="group rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700" title={it.name}>
+                      <ProxyPreview item={it} />
+                      {/* <div className="px-2 py-1 text-xs truncate text-gray-600 dark:text-gray-300">{it.name}</div> */}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
             )}
           </CardContent>
         </Card>
@@ -446,13 +501,25 @@ export default function CustomerDashboard() {
                   ) : (
                     <div className="font-medium">มีลิงก์อยู่แล้ว แต่ยังไม่ได้ยืนยันอีเมล<br />กรุณายืนยันอีเมลก่อนจึงจะแสดง QR Code</div>
                   )}
-                  <Button onClick={handleOpenEmailFlow}>ใส่/ยืนยันอีเมล</Button>
+                  <Button onClick={() => {
+                    setFlowError(null); setEmail(""); setConsent(false); setOtp("");
+                    setStep("email"); setOpenEmailFlow(true); emailKbSuppressRef.current = false;
+                  }}>ใส่/ยืนยันอีเมล</Button>
                 </div>
               )}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* 🔔 Idle countdown banner */}
+      {typeof secondsLeft === "number" && secondsLeft > 0 && secondsLeft <= 20 && (
+        <div className="fixed bottom-4 inset-x-0 flex justify-center pointer-events-none">
+          <div className="pointer-events-auto px-4 py-2 rounded-full bg-black/70 text-red-500 text-sm shadow-lg backdrop-blur">
+            ไม่มีการใช้งาน — จะออกจากระบบอัตโนมัติใน <span className="font-bold">{secondsLeft}</span>
+          </div>
+        </div>
+      )}
 
       {/* Email + Terms + OTP Flow */}
       <Dialog
@@ -493,7 +560,7 @@ export default function CustomerDashboard() {
                     inputMode="email"
                     autoComplete="email"
                     enterKeyHint="go"
-                    placeholder="you@example.com"
+                    placeholder="you@gmail.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     onFocus={(e) => {
@@ -537,7 +604,7 @@ export default function CustomerDashboard() {
                 <div className="grid gap-2">
                   <ScrollArea className="h-44 rounded-md border p-3 text-sm leading-6">
                     <ul className="list-disc pl-5 space-y-2">
-                     <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
+                      <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
                       <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
                       <li>เมื่อยืนยันสำเร็จ อาจมีการสร้าง <strong>ลิงก์แชร์ (Nextcloud)</strong> สำหรับดูหรือดาวน์โหลดรูป</li>
                       <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัย</li>
@@ -586,7 +653,17 @@ export default function CustomerDashboard() {
 
               <div className="grid gap-4">
                 <div className="space-y-1">
-                  <Progress value={otpProgress} />
+                  <Progress
+                    value={otpProgress}
+                    className={[
+                      "h-2 rounded-full",
+                      otpSecsLeft === 0
+                        ? "[&>div]:bg-gray-400"
+                        : isUrgent
+                          ? "[&>div]:bg-red-500 [&>div]:animate-pulse"
+                          : "[&>div]:bg-blue-600",
+                    ].join(" ")}
+                  />
                   <div className="text-xs text-gray-500">เวลาที่เหลือ: {otpSecsLeft}s</div>
                 </div>
 
@@ -621,7 +698,7 @@ export default function CustomerDashboard() {
                     </InputOTPGroup>
                   </InputOTP>
 
-                  {!otpValid && otp.length > 0 && <p className="text-xs text-red-600">ต้องเป็นตัวเลข 6 หลัก</p>}
+                  {!/^\d{6}$/.test(otp || "") && otp.length > 0 && <p className="text-xs text-red-600">ต้องเป็นตัวเลข 6 หลัก</p>}
 
                   <InlineOtpKeypad
                     visible={showOtpKb}
@@ -654,7 +731,7 @@ export default function CustomerDashboard() {
                 >
                   กลับ
                 </Button>
-                <Button onClick={handleVerifyOtp} disabled={!otpValid || sending}>
+                <Button onClick={handleVerifyOtp} disabled={!/^\d{6}$/.test(otp || "") || sending}>
                   {sending ? (<><Loader size={16} className="mr-2" />กำลังยืนยัน…</>) : ("ยืนยันรหัส")}
                 </Button>
               </DialogFooter>

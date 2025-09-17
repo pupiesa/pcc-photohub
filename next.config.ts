@@ -24,9 +24,9 @@ const remotePatterns: NonNullable<NextConfig["images"]>["remotePatterns"] = [
 ];
 
 // ปลายทาง “จริง” ของ backend (origin) — ใช้กับ rewrites เท่านั้น
-const MONGO_API_ORIGIN   = process.env.MONGO_API_ORIGIN   || "http://localhost:2000";
-const NEXTCLOUD_API_ORIGIN = process.env.NEXTCLOUD_API_ORIGIN || "http://localhost:1000";
-const SMTP_API_ORIGIN    = process.env.SMTP_API_ORIGIN    || "http://localhost:4000";
+const MONGO_API_ORIGIN   = process.env.NEXT_PUBLIC_MONGO_BASE;
+const NEXTCLOUD_API_ORIGIN = process.env.NEXT_PUBLIC_NC_BASE;
+const SMTP_API_ORIGIN    = process.env.NEXT_PUBLIC_SMTP_BASE;
 
 //path prefix ฝั่งหน้าเว็บ (public base สำหรับ fetch ฝั่ง client)
 const NEXT_PUBLIC_MONGO_API = process.env.NEXT_PUBLIC_MONGO_API || "/mapi";
