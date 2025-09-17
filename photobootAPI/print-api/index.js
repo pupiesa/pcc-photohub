@@ -115,7 +115,7 @@ app.post("/print", async (req, res) => {
 
     const pdfBytes = await pdfDoc.save();
     fs.writeFileSync(outputPath, pdfBytes);
-    console.log(`✅ Combined PDF created at ${outputPath}`);
+    // console.log(`✅ Combined PDF created at ${outputPath}`);
 
     // Automatically print
     await printPDF(outputPath);
