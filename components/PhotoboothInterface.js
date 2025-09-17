@@ -12,6 +12,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 const CAMERA_BASE = (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
 
+const PRINT_HOST = (process.env.PRINT_API_HOST || "127.0.0.1");
+const PRINT_PORT = (process.env.PRINT_API_PORT || "5000")
+const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
+
 export default function PhotoboothInterface({ user, onLogout }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -111,6 +115,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
     setLiveSrc(null);
     await stopCamera().catch(() => {});
 
+
     setRedirecting(true);
     router.push("/dashboard");
   };
@@ -131,6 +136,19 @@ export default function PhotoboothInterface({ user, onLogout }) {
         setLiveSrc(null);
         await stopCamera().catch(() => {});
         await uploadBatchAndGo(nextPaths);
+        // console.log("nextPaths response:", nextPaths);
+        try {
+          const apiRes = await fetch(`${PRINT_BASE}/print`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paths: nextPaths }),
+          });
+          if (!apiRes.ok) {
+            console.error("Custom API call failed:", await apiRes.text());
+          }
+        } catch (err) {
+          console.error("Error calling custom API:", err);
+        }
         return;
       }
 
