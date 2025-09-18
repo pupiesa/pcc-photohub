@@ -8,11 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "mongo": "node --env-file=.env photobootAPI/mongo-api/mongoAPI.js",
+    "print-api": "node --env-file=.env photobootAPI/print-api/index.js",
     "nextcloud": "node --env-file=.env photobootAPI/nextcloud-api/nextcloudAPI.js",
     "smtp": "node --env-file=.env photobootAPI/smtp-api/smtpAPI.js",
     "dev": "node dev-supervisor.mjs",
     "server": "node dev-server-supervisor.mjs",
-    "install:all": "npm --prefix ./photobootAPI/mongo-api i && npm --prefix ./photobootAPI/nextcloud-api i && npm --prefix ./photobootAPI/smtp-api i"
+    "install:all": "npm --prefix ./photobootAPI/mongo-api i && npm --prefix ./photobootAPI/nextcloud-api i && npm --prefix ./photobootAPI/smtp-api i && npm --prefix ./photobootAPI/print-api i"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.7.0",
@@ -31,8 +32,10 @@
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "ai": "^5.0.44",
     "axios": "^1.11.0",
+    "child_process": "^1.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.2",
     "dropdown-menu": "^0.1.1",
     "fix": "^0.0.3",
     "harden-react-markdown": "^1.0.5",
@@ -48,7 +51,7 @@
     "react-icons": "^5.5.0",
     "react-markdown": "^10.1.0",
     "react-qr-code": "^2.0.18",
-    "react-syntax-highlighter": "^5.8.0",
+    "react-syntax-highlighter": "^15.6.6",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",

@@ -1,40 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pcc-photohub
 
-## Getting Started
+This is a Next.js Photobooth project Combind with Python3 for camera backed
 
-First, run the development server:
+## Using the project
+
+You have to host your own [MongoDB](https://www.mongodb.com/) and [nextcloud](https://nextcloud.com/) Settup and ready before follow this guide
+
+Also ensure that your system have [Nodejs](https://nextjs.org), [Python3](https://www.python.org/) setup already
+
+First, install the python requirements using [Python virtual environment](https://virtualenv.pypa.io/en/latest/)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-======= how to run server ||step by step|| ======
-1. add .env file to pcc-photohub
-2. npm i
-3. npm run install:all
-
- ~[run all service]~
--- npm run dev   
-
-~[view command service]~  
--- npm run-script   
-
-~[API_Webdemo]~ 
-1.  cd .\photobootAPI\examples\web-demo\
-2.  npx http-server -p 5173 .
-=============================
-
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then use [pip](https://pip.pypa.io/en/stable/) to install requirement.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pip3 install -r requirements.txt
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+then install nodejs requirements by
+
+```bash
+npm install
+npm run install:all
+```
+
+Lastly setup your .env by using [dotenvtemplate](dotenvtemplate)
+
+### Starting sequent
+
+```bash
+python3 usbcam.py #or ref.py for dslr mirrorless camera
+```
+open new terminal tab then run
+```bash
+npm run dev  
+```
+Open [http://localhost:3000/booth](http://localhost:3000/booth) with your browser.
+
 
 ## Learn More
 
@@ -42,11 +48,13 @@ To learn more about Next.js, take a look at the following resources:
 
 - [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
 - [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- [Geist](https://vercel.com/font) - a new font family for Vercel
+- [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) - automatically optimize and load
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Debbuging
+api test is avaible at 
+```bash
+cd photobootAPI/examples/web-demo
+npx http-server -p 5173 .
+```
+editing the page by modifying [app/booth/page.tsx](app/booth/page.js) The page will auto-updates as you edit the file.

@@ -1,0 +1,7 @@
+# Ignore node modules
+node_modules/
+uploads/
+*.jpg
+*.pdf
+*.png
+# package-lock.json

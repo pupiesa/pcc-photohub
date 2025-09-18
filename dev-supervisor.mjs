@@ -22,6 +22,7 @@ const procs = {
   nc:    { child: null, fails: 0, cooldownUntil: 0, name: 'nextcloud', base: NC_BASE,    path: '/api/health' },
   smtp:  { child: null, fails: 0, cooldownUntil: 0, name: 'smtp',      base: SMTP_BASE,  path: '/' }, // smtp ไม่มี /api/health ก็เช็ค /
   ui:    { child: null, name: 'ui' },
+  print: { child: null, name: 'print' },
 };
 
 /** ------------ UTILS ------------- */
@@ -105,6 +106,16 @@ function startUI() {
   });
 }
 
+function starprint() {
+  if (procs.print.child) return;
+  log('printer', 'starting...', 'green');
+  procs.nc.child = spawn('node', ['--env-file=.env', 'photobootAPI/print-api/index.js'], { stdio: 'inherit', shell: true });
+  procs.nc.child.on('exit', (code, sig) => {
+    log('printer', `exited (code=${code} sig=${sig})`, 'yellow');
+    procs.print.child = null;
+  });
+}
+
 async function restart(which) {
   const p = procs[which];
   if (!p) return;
@@ -161,6 +172,7 @@ function main() {
   startNC();
   startSMTP();
   startUI();
+  starprint();
 
   setTimeout(healthLoop, STARTUP_GRACE_MS);
   setInterval(healthLoop, CHECK_INTERVAL_MS);
@@ -171,6 +183,7 @@ function main() {
     await killTree(procs.nc.child);
     await killTree(procs.smtp.child);
     await killTree(procs.ui.child);
+    await killTree(procs.print.child);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
