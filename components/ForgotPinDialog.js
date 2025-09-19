@@ -34,18 +34,18 @@ function InlineOtpKeypad({ visible, setValue, onDone, maxLen = 6 }) {
         {keys.slice(0, 9).map((k) => (
           <Button key={k} variant="secondary" onClick={() => press(k)}>{k}</Button>
         ))}
-        <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
+        <Button variant="default" onClick={() => press("clear")} className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
         <Button variant="secondary" onClick={() => press("0")}>0</Button>
         <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
       </div>
-      <div className="flex gap-2 pt-2 justify-between">
+      <div className="flex gap-2 pt-2 justify-between end-side">
         <Button onClick={onDone}>เสร็จสิ้น</Button>
       </div>
     </div>
   );
 }
 
-const OTP_TOTAL_SECS = 80;
+const OTP_TOTAL_SECS = 80; // 1 นาที 20 วินาที
 
 /** ForgotPinDialog */
 export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset }) {

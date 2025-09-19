@@ -131,7 +131,7 @@ function InlineEmailKeyboard({ visible, setValue, onDone }) {
         ))}
         <div className="flex gap-1 justify-center">
           <Button variant="secondary" onClick={() => press("@gmail.com")}>@gmail.com</Button>
-          <Button variant="secondary" onClick={() => press(".ac.th")}>.ac.th</Button>
+          <Button variant="secondary" onClick={() => press("@kmitl.ac.th")}>@kmitl.ac.th</Button>
           <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
           <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
         </div>
@@ -270,13 +270,11 @@ export default function CustomerDashboard() {
     if (!openEmailFlow) return;
     const t = setTimeout(() => {
       if (step === "email" && emailInputRef.current) {
-        emailInputRef.current.focus({ preventScroll: true });
         safeSelectAll(emailInputRef.current);
         emailInputRef.current.scrollIntoView({ block: "center" });
         setShowEmailKb(true);
       }
       if (step === "otp" && otpFirstSlotRef.current) {
-        otpFirstSlotRef.current.focus({ preventScroll: true });
         setShowOtpKb(true);
       }
       if (step === "terms") {
@@ -553,24 +551,24 @@ export default function CustomerDashboard() {
                     </div>
                   </div>
 
-                  <Input
-                    id="email"
-                    ref={emailInputRef}
-                    type="text"
-                    inputMode="email"
-                    autoComplete="email"
-                    enterKeyHint="go"
-                    placeholder="you@gmail.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onFocus={(e) => {
-                      e.target.scrollIntoView({ block: "center" });
-                      if (!emailKbSuppressRef.current) setShowEmailKb(true);
-                    }}
-                  />
-                  {!emailValid && email.length > 0 && (
-                    <p className="text-xs text-red-600">รูปแบบอีเมลไม่ถูกต้อง</p>
-                  )}
+                <Input
+                  readOnly={showEmailKb}
+                  id="email"
+                  ref={emailInputRef}
+                  type="text"
+                  inputMode="email"
+                  autoComplete="email"
+                  enterKeyHint="go"
+                  placeholder="your@gmail.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onCopy={(e) => e.preventDefault()}
+                  onContextMenu={(e) => e.preventDefault()}
+                  className="select-none focus:outline-none"
+                />
+                {!emailValid && email.length > 0 && (
+                  <p className="text-xs text-red-600">รูปแบบอีเมลไม่ถูกต้อง</p>
+                )}
 
                   <InlineEmailKeyboard
                     visible={showEmailKb}
