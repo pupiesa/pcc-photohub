@@ -387,6 +387,340 @@ app.put('/api/user/:number/consented/true', async (req, res) => {
   }
 });
 
+// =============================================================
+// ==============   PROMO: Schema & Endpoints   ================
+// =============================================================
+
+// --- helpers ---
+const nowUtc = () => new Date();
+const normalizeCode = (s) => String(s || "").trim().toUpperCase();
+
+function computeAutoActive(p) {
+  const now = nowUtc();
+  // หมดอายุ / ยังไม่เริ่ม
+  if (p.start_at && now < p.start_at) return false;
+  if (p.end_at && now > p.end_at) return false;
+  // เต็มจำนวน
+  if (typeof p.usage_limit === "number" && p.usage_limit > 0) {
+    if (p.used_count >= p.usage_limit) return false;
+  }
+  // ถ้า owner ปิดเองให้เคารพค่าด้วย
+  return p.is_active === true;
+}
+
+// --- schemas ---
+const PromoSchema = new mongoose.Schema(
+  {
+    code: { type: String, required: true },
+    type: { type: String, enum: ["percent", "fixed"], required: true },
+    value: { type: Number, required: true, min: 0 },
+    start_at: { type: Date, default: null },
+    end_at: { type: Date, default: null },
+    usage_limit: { type: Number, default: 0 },
+    per_user_limit: { type: Number, default: 1, min: 0 },
+    used_count: { type: Number, default: 0 },
+    is_active: { type: Boolean, default: true },
+    note: { type: String, default: "" },
+  },
+  { timestamps: true, versionKey: false, collection: "promocodes" }
+);
+
+PromoSchema.index({ code: 1 }, { unique: true });
+
+const PromoRedemptionSchema = new mongoose.Schema(
+  {
+    promo_code: { type: String, required: true, index: true },
+    promo_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promo", index: true },
+    user_number: { type: String, required: true, index: true },
+    redeemed_at: { type: Date, default: () => new Date() },
+    amount_before: { type: Number, default: null },
+    discount_amount: { type: Number, default: null },
+    amount_after: { type: Number, default: null },
+  },
+  { timestamps: true, versionKey: false, collection: "promo_redemptions" }
+);
+
+const Promo = mongoose.model("Promo", PromoSchema);
+const PromoRedemption = mongoose.model("PromoRedemption", PromoRedemptionSchema);
+function describeDiscount(promo, amount) {
+  // คำนวณจำนวนลด (ไม่บันทึก DB ใน /validate)
+  const amt = typeof amount === "number" && amount >= 0 ? amount : null;
+  let discount = null;
+  if (amt != null) {
+    if (promo.type === "percent") {
+      discount = Math.floor((amt * Math.max(0, Math.min(100, promo.value))) / 100);
+    } else {
+      discount = Math.max(0, promo.value);
+    }
+    if (discount > amt) discount = amt; // ไม่ให้ติดลบ
+  }
+  return {
+    type: promo.type,
+    value: promo.value,
+    amount_before: amt,
+    discount_amount: discount,
+    amount_after: amt != null && discount != null ? Math.max(0, amt - discount) : null,
+  };
+}
+
+async function refreshAutoDeactivate(p) {
+  const shouldBeActive = computeAutoActive(p);
+  if (p.is_active !== shouldBeActive) {
+    p.is_active = shouldBeActive;
+    try { await p.save(); } catch {}
+  }
+  return p;
+}
+
+async function canUserRedeem(promo, user_number) {
+  if (!computeAutoActive(promo)) return { ok: false, reason: "INACTIVE_OR_EXPIRED" };
+
+  if (typeof promo.per_user_limit === "number" && promo.per_user_limit > 0) {
+    const usedByUser = await PromoRedemption.countDocuments({
+      promo_id: promo._id,
+      user_number: String(user_number),
+    });
+    if (usedByUser >= promo.per_user_limit) {
+      return { ok: false, reason: "PER_USER_LIMIT_REACHED" };
+    }
+  }
+  return { ok: true };
+}
+
+// ===================================================================
+// 1) Create promo (POST /api/promos)
+// ===================================================================
+app.post("/api/promos", async (req, res) => {
+  try {
+    const {
+      code,
+      type,           // "percent" | "fixed"
+      value,
+      start_at,       // ISO string
+      end_at,         // ISO string
+      usage_limit,    // 0 = unlimited
+      per_user_limit, // 0 = unlimited per user
+      is_active,      // default true
+      note,
+    } = req.body || {};
+
+    if (!code || !type || value == null) {
+      return res.status(400).json({ ok: false, message: "code, type, value are required" });
+    }
+    if (!["percent", "fixed"].includes(type)) {
+      return res.status(400).json({ ok: false, message: "type must be 'percent' or 'fixed'" });
+    }
+    if (type === "percent" && (value < 0 || value > 100)) {
+      return res.status(400).json({ ok: false, message: "percent value must be between 0-100" });
+    }
+    if (type === "fixed" && value < 0) {
+      return res.status(400).json({ ok: false, message: "fixed value must be >= 0" });
+    }
+
+    const payload = {
+      code: normalizeCode(code),
+      type,
+      value: Number(value),
+      start_at: start_at ? new Date(start_at) : null,
+      end_at: end_at ? new Date(end_at) : null,
+      usage_limit: usage_limit == null ? 0 : Number(usage_limit),
+      per_user_limit: per_user_limit == null ? 1 : Number(per_user_limit),
+      is_active: typeof is_active === "boolean" ? is_active : true,
+      note: String(note || ""),
+    };
+
+    const created = await Promo.create(payload);
+    await refreshAutoDeactivate(created);
+
+    return res.status(201).json({ ok: true, data: created });
+  } catch (e) {
+    if (e?.code === 11000) {
+      return res.status(409).json({ ok: false, message: "Duplicate code" });
+    }
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+
+// ===================================================================
+// 2) GET /api/promos?active=true   (list, filter active)
+// ===================================================================
+app.get("/api/promos", async (req, res) => {
+  try {
+    const { active } = req.query;
+    const list = await Promo.find({}).sort({ createdAt: -1 }).lean();
+
+    // อัปเดตสถานะอัตโนมัติแบบขณะอ่าน (best-effort)
+    const now = nowUtc();
+    const mapped = await Promise.all(
+      list.map(async (p) => {
+        const doc = await Promo.findById(p._id);
+        await refreshAutoDeactivate(doc);
+        return doc.toObject();
+      })
+    );
+
+    let result = mapped;
+    if (active === "true") result = result.filter((p) => computeAutoActive(p));
+    if (active === "false") result = result.filter((p) => !computeAutoActive(p));
+
+    return res.json({ ok: true, data: result, now });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+
+// ===================================================================
+// 3) GET /api/promos/:code   (single)
+// ===================================================================
+app.get("/api/promos/:code", async (req, res) => {
+  try {
+    const code = normalizeCode(req.params.code);
+    const promo = await Promo.findOne({ code });
+    if (!promo) return res.status(404).json({ ok: false, message: "PROMO_NOT_FOUND" });
+    await refreshAutoDeactivate(promo);
+    return res.json({ ok: true, data: promo });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+
+// ===================================================================
+// 4) PATCH /api/promos/:code   (partial update)
+// ===================================================================
+app.patch("/api/promos/:code", async (req, res) => {
+  try {
+    const code = normalizeCode(req.params.code);
+    const body = req.body || {};
+
+    // จำกัดฟิลด์ที่อัปเดตได้
+    const up = {};
+    if (body.type && ["percent", "fixed"].includes(body.type)) up.type = body.type;
+    if (body.value != null) up.value = Number(body.value);
+    if (body.start_at !== undefined) up.start_at = body.start_at ? new Date(body.start_at) : null;
+    if (body.end_at !== undefined) up.end_at = body.end_at ? new Date(body.end_at) : null;
+    if (body.usage_limit != null) up.usage_limit = Number(body.usage_limit);
+    if (body.per_user_limit != null) up.per_user_limit = Number(body.per_user_limit);
+    if (typeof body.is_active === "boolean") up.is_active = body.is_active;
+    if (body.note !== undefined) up.note = String(body.note || "");
+
+    const promo = await Promo.findOneAndUpdate({ code }, { $set: up }, { new: true });
+    if (!promo) return res.status(404).json({ ok: false, message: "PROMO_NOT_FOUND" });
+
+    await refreshAutoDeactivate(promo);
+    return res.json({ ok: true, data: promo });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+
+// ===================================================================
+// 5) POST /api/promos/:code/deactivate
+// ===================================================================
+app.post("/api/promos/:code/deactivate", async (req, res) => {
+  try {
+    const code = normalizeCode(req.params.code);
+    const promo = await Promo.findOneAndUpdate({ code }, { $set: { is_active: false } }, { new: true });
+    if (!promo) return res.status(404).json({ ok: false, message: "PROMO_NOT_FOUND" });
+    return res.json({ ok: true, data: promo });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+
+// ===================================================================
+// 6) POST /api/promos/:code/validate   (no DB write)
+// body: { user_number?: string, amount?: number }
+// ===================================================================
+app.post("/api/promos/:code/validate", async (req, res) => {
+  try {
+    const code = normalizeCode(req.params.code);
+    const user_number =req.body?.user_number ?? req.body?.userNumber ?? req.body?.user ?? req.body?.number ?? null;
+    const amountRaw =req.body?.amount ?? req.body?.orderAmount ?? req.body?.total ?? req.body?.price ?? null;
+    const amount = amountRaw != null ? Number(amountRaw) : null;
+    const promo = await Promo.findOne({ code });
+    if (!promo) return res.status(404).json({ ok: false, message: "PROMO_NOT_FOUND" });
+
+    await refreshAutoDeactivate(promo);
+    if (!computeAutoActive(promo)) {
+      return res.status(400).json({ ok: false, message: "INACTIVE_OR_EXPIRED" });
+    }
+
+    if (user_number) {
+      const per = await canUserRedeem(promo, String(user_number));
+      if (!per.ok) return res.status(400).json({ ok: false, message: per.reason });
+    }
+
+    const pricing = describeDiscount(promo, typeof amount === "number" ? amount : null);
+    return res.json({ ok: true, data: { promo, pricing } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+
+
+// ===================================================================
+// 7) POST /api/promos/:code/redeem   (write redemption + inc used_count)
+// body: { user_number: string, amount?: number }
+// ===================================================================
+app.post("/api/promos/:code/redeem", async (req, res) => {
+  try {
+    const code = normalizeCode(req.params.code);
+    const user_number = req.body?.user_number ?? req.body?.userNumber ?? req.body?.user ?? req.body?.number ?? null;
+
+    if (!user_number) {
+      return res.status(400).json({ ok: false, message: "user_number is required" });
+    }
+
+    const amountRaw = req.body?.amount ?? req.body?.orderAmount ?? req.body?.total ?? req.body?.price ?? null;
+    const amount = amountRaw != null ? Number(amountRaw) : null;
+
+    let promo = await Promo.findOne({ code });
+    if (!promo) return res.status(404).json({ ok: false, message: "PROMO_NOT_FOUND" });
+
+    await refreshAutoDeactivate(promo);
+    if (!computeAutoActive(promo)) {
+      return res.status(400).json({ ok: false, message: "INACTIVE_OR_EXPIRED" });
+    }
+
+    const per = await canUserRedeem(promo, String(user_number));
+    if (!per.ok) return res.status(400).json({ ok: false, message: per.reason });
+
+    if (promo.usage_limit > 0 && promo.used_count >= promo.usage_limit) {
+      await refreshAutoDeactivate(promo);
+      return res.status(400).json({ ok: false, message: "USAGE_LIMIT_REACHED" });
+    }
+
+    const pricing = describeDiscount(promo, typeof amount === "number" ? amount : null);
+
+    const redemption = await PromoRedemption.create({
+      promo_code: promo.code,
+      promo_id: promo._id,
+      user_number: String(user_number),
+      amount_before: pricing.amount_before,
+      discount_amount: pricing.discount_amount,
+      amount_after: pricing.amount_after,
+    });
+
+    promo.used_count += 1;
+    await promo.save();
+    await refreshAutoDeactivate(promo);
+
+    return res.status(201).json({ ok: true, data: { redemption, promo, pricing } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, message: "server error" });
+  }
+});
+// =============================================================
+// ================   Health Check Endpoints   ==================
+// =============================================================
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.head('/api/health', (_req, res) => res.status(200).end());
