@@ -36,7 +36,7 @@ function InlineOtpKeypad({ visible, setValue, onDone, maxLen = 6 }) {
         ))}
         <Button variant="default" onClick={() => press("clear")} className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
         <Button variant="secondary" onClick={() => press("0")}>0</Button>
-        <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
+        <Button variant="outline" onClick={() => press("back")}>⌫</Button>
       </div>
       <div className="flex gap-2 pt-2 justify-between end-side">
         <Button onClick={onDone}>เสร็จสิ้น</Button>

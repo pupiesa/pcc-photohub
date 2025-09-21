@@ -22,6 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradient";
+import { Skeleton } from "@/components/ui/skeleton"; // เพิ่มสำหรับ skeleton กริด/รูป
 
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
@@ -55,20 +56,106 @@ function deriveRelPath(it) {
   return String(it?.name || "").replace(/^\/+/, "");
 }
 
-function ProxyPreview({ item }) {
+function ProxyPreview({ item, onLoadingComplete, className }) {
   const rel = deriveRelPath(item);
-  if (!rel) return <div className="w-full h-32 bg-gray-200/20 rounded" />;
+  if (!rel) return <div className="w-full aspect-square bg-gray-200/20 rounded" />;
   return (
-    <div className="relative w-full h-32">
+    <div className={`relative w-full aspect-square ${className || ""}`}>
       <Image
         src={buildProxyPreview(rel)}
-        alt="preview"
+        alt={item?.name || "preview"}
         fill
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 20vw"
-        className="object-cover select-none pointer-events-none"
+        className="object-cover select-none"
         unoptimized
+        loading="lazy"
+        onLoadingComplete={onLoadingComplete}
       />
     </div>
+  );
+}
+
+/* ---------- Progressive Gallery  ---------- */
+function PhotoCard({ item }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div
+      className="group relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
+      title={item?.name}
+    >
+      <div
+        className={`absolute inset-0 transition-opacity duration-300 ${
+          loaded ? "opacity-0" : "opacity-100"
+        }`}
+      >
+        <div className="w-full h-full">
+          <div className="w-full h-full bg-gray-300/10 dark:bg-gray-700/30" />
+        </div>
+      </div>
+
+      <ProxyPreview
+        item={item}
+        className={`transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
+        onLoadingComplete={() => setLoaded(true)}
+      />
+    </div>
+  );
+}
+
+/* ---------- Grid + Infinite Scroll  ---------- */
+const PAGE_SIZE = 9;
+
+function useInfiniteInScrollArea({ rootRef, hasMore, loadMore, margin = "1000px" }) {
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    if (!rootRef.current || !sentinelRef.current) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first?.isIntersecting && hasMore) loadMore();
+      },
+      { root: rootRef.current, rootMargin: margin, threshold: 0.01 }
+    );
+    io.observe(sentinelRef.current);
+    return () => io.disconnect();
+  }, [rootRef, hasMore, loadMore, margin]);
+  return { sentinelRef };
+}
+
+function GalleryScrollGrid({ gallery }) {
+  const scrollRef = useRef(null);
+  const [page, setPage] = useState(1);
+  const visible = useMemo(() => gallery.slice(0, page * PAGE_SIZE), [gallery, page]);
+  const hasMore = visible.length < gallery.length;
+  const loadMore = useCallback(() => setPage((p) => p + 1), []);
+
+  const { sentinelRef } = useInfiniteInScrollArea({
+    rootRef: scrollRef,
+    hasMore,
+    loadMore,
+    margin: "1000px",
+  });
+
+  return (
+    <ScrollArea ref={scrollRef} className="h-[46vh] pr-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        {visible.map((it, idx) => (
+          <PhotoCard
+            key={`${it.name || it.path || "item"}-${idx}`}
+            item={it}
+            priority={idx < 8} // รูปชุดแรก ๆ โหลดแบบ eager
+          />
+        ))}
+
+        {hasMore &&
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={`sk-${i}`} className="rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="w-full aspect-square bg-gray-300/10 dark:bg-gray-700/30 animate-pulse" />
+            </div>
+          ))}
+      </div>
+      <div ref={sentinelRef} className="h-4 w-full" />
+    </ScrollArea>
   );
 }
 
@@ -91,9 +178,9 @@ function InlineOtpKeypad({ visible, setValue, onDone }) {
         {keys.slice(0, 9).map((k) => (
           <Button key={k} variant="secondary" onClick={() => press(k)}>{k}</Button>
         ))}
-        <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
+        <Button variant="outline" onClick={() => press("clear")} className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
         <Button variant="secondary" onClick={() => press("0")}>0</Button>
-        <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
+        <Button variant="outline" onClick={() => press("back")}>⌫</Button>
       </div>
       <div className="flex gap-2 pt-2 justify-end">
         <Button onClick={onDone}>เสร็จสิ้น</Button>
@@ -132,8 +219,8 @@ function InlineEmailKeyboard({ visible, setValue, onDone }) {
         <div className="flex gap-1 justify-center">
           <Button variant="secondary" onClick={() => press("@gmail.com")}>@gmail.com</Button>
           <Button variant="secondary" onClick={() => press("@kmitl.ac.th")}>@kmitl.ac.th</Button>
-          <Button variant="outline" onClick={() => press("clear")}>ล้าง</Button>
-          <Button variant="outline" onClick={() => press("back")}>ลบ</Button>
+          <Button variant="outline" onClick={() => press("clear")}className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
+          <Button variant="outline" onClick={() => press("back")}>⌫</Button>
         </div>
         <div className="flex justify-end">
           <Button onClick={onDone}>เสร็จสิ้น</Button>
@@ -232,12 +319,11 @@ export default function CustomerDashboard() {
   useEffect(() => {
     if (!phone) return;
 
-    // Events that count as user interaction
     const events = ["pointerdown","keydown","mousemove","wheel","touchstart","scroll"];
     const handler = () => resetIdle();
 
     events.forEach((ev) => window.addEventListener(ev, handler, { passive: true }));
-    resetIdle(); // start the first countdown immediately
+    resetIdle();
 
     const tick = setInterval(() => {
       const ms = Math.max(0, deadlineRef.current - Date.now());
@@ -262,8 +348,6 @@ export default function CustomerDashboard() {
     const v = email.trim();
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length <= 254;
   }, [email]);
-
-  const otpValid = useMemo(() => /^\d{6}$/.test(otp.trim()), [otp]);
 
   // focus + keyboards according to step
   useEffect(() => {
@@ -300,12 +384,6 @@ export default function CustomerDashboard() {
     }, 1000);
     return () => { alive = false; clearInterval(id); };
   }, [step, otpTimerKey]);
-
-  const handleOpenEmailFlow = () => {
-    setFlowError(null); setEmail(""); setConsent(false); setOtp("");
-    setStep("email"); setOpenEmailFlow(true);
-    emailKbSuppressRef.current = false;
-  };
 
   const isDuplicateEmailError = (e) => {
     const msg = String(e?.message || "").toLowerCase();
@@ -423,7 +501,7 @@ export default function CustomerDashboard() {
   }, [otpSecsLeft]);
 
   return (
-    <div className="h-screen w-full overflow-hidden flex flex-col items-center py-8">
+    <div className="h-full w-full overflow-hidden flex flex-col items-center py-8">
       <div className="w-full max-w-5xl px-4 flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold tracking-tight">My Gallery</h1>
         <div className="flex gap-2">
@@ -446,22 +524,20 @@ export default function CustomerDashboard() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="text-sm text-gray-500">Loading gallery…</div>
+              <div className="space-y-3">
+                <div className="text-sm text-gray-500">Loading gallery…</div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="w-full aspect-square rounded-lg" />
+                  ))}
+                </div>
+              </div>
             ) : error ? (
               <div className="text-sm text-red-600">{error}</div>
             ) : gallery.length === 0 ? (
               <div className="text-sm text-gray-500">No photos</div>
             ) : (
-              <ScrollArea className="h-[46vh] pr-2">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                  {gallery.map((it, idx) => (
-                    <div key={`${(it.name || it.path || "item")}-${idx}`} className="group rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700" title={it.name}>
-                      <ProxyPreview item={it} />
-                      {/* <div className="px-2 py-1 text-xs truncate text-gray-600 dark:text-gray-300">{it.name}</div> */}
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
+              <GalleryScrollGrid gallery={gallery} />
             )}
           </CardContent>
         </Card>
@@ -489,20 +565,18 @@ export default function CustomerDashboard() {
                     <div className="bg-white p-3 rounded-lg">
                       <div className="text-xs font-semibold text-gray-800 text-center mb-2">ProjectPhoto_PCC</div>
                       <QRCode value={summary.link} size={172} />
+                      <div className="text-xs font-semibold text-red-500 text-center pt-2">Password is your Phone</div>
                     </div>
                   </BackgroundGradient>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-3 text-center">
-                  {!summary.link ? (
-                    <div className="font-medium">ยังไม่ได้สร้างลิงก์</div>
-                  ) : (
-                    <div className="font-medium">มีลิงก์อยู่แล้ว แต่ยังไม่ได้ยืนยันอีเมล<br />กรุณายืนยันอีเมลก่อนจึงจะแสดง QR Code</div>
-                  )}
+                  <div className="font-medium">ยันยันอีเมลเพื่อใช้ยืนยันตัวตนเเละกู้คืน PIN</div>
                   <Button onClick={() => {
                     setFlowError(null); setEmail(""); setConsent(false); setOtp("");
                     setStep("email"); setOpenEmailFlow(true); emailKbSuppressRef.current = false;
                   }}>ใส่/ยืนยันอีเมล</Button>
+                  <div className="text-xs text-gray-500 mt-1">สามารถดูรูปออนไลน์ได้หลังจากยืนยันอีเมลสำเร็จ</div>
                 </div>
               )}
             </div>
@@ -551,24 +625,24 @@ export default function CustomerDashboard() {
                     </div>
                   </div>
 
-                <Input
-                  readOnly={showEmailKb}
-                  id="email"
-                  ref={emailInputRef}
-                  type="text"
-                  inputMode="email"
-                  autoComplete="email"
-                  enterKeyHint="go"
-                  placeholder="your@gmail.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onCopy={(e) => e.preventDefault()}
-                  onContextMenu={(e) => e.preventDefault()}
-                  className="select-none focus:outline-none"
-                />
-                {!emailValid && email.length > 0 && (
-                  <p className="text-xs text-red-600">รูปแบบอีเมลไม่ถูกต้อง</p>
-                )}
+                  <Input
+                    readOnly={showEmailKb}
+                    id="email"
+                    ref={emailInputRef}
+                    type="text"
+                    inputMode="email"
+                    autoComplete="email"
+                    enterKeyHint="go"
+                    placeholder="your@gmail.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onCopy={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="select-none focus:outline-none"
+                  />
+                  {!emailValid && email.length > 0 && (
+                    <p className="text-xs text-red-600">รูปแบบอีเมลไม่ถูกต้อง</p>
+                  )}
 
                   <InlineEmailKeyboard
                     visible={showEmailKb}
@@ -602,13 +676,13 @@ export default function CustomerDashboard() {
                 <div className="grid gap-2">
                   <ScrollArea className="h-44 rounded-md border p-3 text-sm leading-6">
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
-                      <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
-                      <li>เมื่อยืนยันสำเร็จ อาจมีการสร้าง <strong>ลิงก์แชร์ (Nextcloud)</strong> สำหรับดูหรือดาวน์โหลดรูป</li>
-                      <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัย</li>
-                      <li>ระบบจะเก็บข้อมูลการใช้งานบางส่วน เพื่อความปลอดภัย ตาม <strong>นโยบายความเป็นส่วนตัว</strong></li>
-                      <li>คุณมีสิทธิ์ในการ <strong>ขอแก้ไข หรือลบข้อมูล</strong> ตามที่กฎหมายกำหนด</li>
-                      <li>การดำเนินการต่อ ถือว่าคุณได้ <strong>ยอมรับเงื่อนไขและนโยบายความเป็นส่วนตัว</strong> แล้ว</li>
+                        <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
+                        <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
+                        <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัยของคุณ</li>
+                        <li><strong>ข้อควรระวัง:</strong> การเปิดเผยรหัสหรือลิงก์แก่บุคคลอื่น อาจทำให้ข้อมูลรั่วไหล pccphoto-hub ไม่รับผิดชอบต่อความเสียหายที่เกิดจากการเผยแพร่เอง</li>
+                        <li>คุณยอมรับและอนุญาตให้ <strong>pccphoto-hub</strong> เก็บและใช้ข้อมูลที่เกี่ยวข้อง เพื่อการให้บริการและตามที่กฎหมายกำหนด</li>
+                        <li>คุณมีสิทธิ์ <strong>ขอแก้ไข หรือลบข้อมูล</strong> ตามสิทธิที่กฎหมายคุ้มครอง</li>
+                        <li>การดำเนินการต่อ ถือว่าคุณได้ <strong>ยอมรับเงื่อนไขและนโยบายความเป็นส่วนตัว</strong> แล้ว</li>
                     </ul>
                   </ScrollArea>
 
