@@ -4,6 +4,7 @@ import "./globals.css";
 import React from "react";
 import LayoutWrapper from "@/components/Layoutwrapper";
 import { Toaster } from "sonner"; // ✅ ใช้ sonner แทน toast เดิม
+import NextSessionProvider from "@/components/sessionProvider";
 
 export const metadata = {
   title: "PCC Photo Hub",
@@ -20,21 +21,23 @@ export default function RootLayout({ children }) {
         <link rel="icon" href="/favicon.ico" />
       </head>
       <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <LayoutWrapper>{children}</LayoutWrapper>
-          <Toaster
-            richColors
-            closeButton
-            position="top-center"
-            expand={false}
-            duration={3000}
-          />
-        </ThemeProvider>
+        <NextSessionProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <LayoutWrapper>{children}</LayoutWrapper>
+            <Toaster
+              richColors
+              closeButton
+              position="top-center"
+              expand={false}
+              duration={3000}
+            />
+          </ThemeProvider>
+        </NextSessionProvider>
       </body>
     </html>
   );

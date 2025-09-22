@@ -10,6 +10,7 @@ import PhoneLoginCard from "@/components/PhoneLoginCard";
 import PhotoboothInterface from "@/components/PhotoboothInterface";
 import ForgotPinDialog from "@/components/ForgotPinDialog";
 import PromotionCard from "@/components/promotionCard";
+import { useSession, signIn, signOut } from "next-auth/react";
 
 const WARP_CONFIG = {
   perspective: 150,
@@ -51,6 +52,7 @@ async function ping(base, path = "/api/health", timeout = 2500) {
 }
 
 export default function BoothPage() {
+  const { data: session } = useSession();
   const [currentView, setCurrentView] = useState("start"); // "start" | "login" | "photobooth"
   const [user, setUser] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -172,69 +174,37 @@ export default function BoothPage() {
   const handleLogin = async ({ phone, pin }) => {
     setBusy(true);
     try {
-      let existed = true;
-      try {
-        await client.getUserByNumber(phone);
-      } catch (e) {
-        // มี user ไหม
-        if (e?.status === 404) existed = false;
-        else throw e;
+      const result = await signIn("credentials", {
+        redirect: false,
+        phone,
+        pin,
+      });
+
+      if (result?.error) {
+        showNotice(`Login failed: ${result.error}`, "warn", false, 5000);
+        return;
       }
 
-      // ล็อกอิน/สมัคร + ตรวจ PIN
-      await client.ensureUserAndPin({ number: phone, pin }); // ถ้า PIN ผิดจะ 401
-      if (typeof window !== "undefined") {
-        localStorage.setItem("pcc_user_phone", phone);
-        localStorage.setItem("pcc_user_pin", pin);
-      }
       setUser({ phone });
       setCurrentView("Coupon");
-      showNotice(
-        existed ? "Signed in" : "New user created",
-        "success",
-        false,
-        4000
-      );
+      showNotice("Signed in", "success", false, 4000);
       setWrongCount(0);
     } catch (e) {
-      if (
-        !e?.status &&
-        (e?.name === "TypeError" ||
-          /Failed to fetch|NetworkError|fetch/i.test(e?.message || ""))
-      ) {
-        showNotice("API unreachable. Please check connection.", "warn", true);
-      } else if (e?.status === 401) {
-        showNotice("Wrong PIN", "error", false, 4000);
-        setWrongCount((c) => {
-          const next = c + 1;
-          if (next >= 3) {
-            setForgotPhone(phone);
-            setForgotOpen(true); // เด้ง popup ลืม PIN
-          }
-          return next;
-        });
-      } else if (e?.status >= 500) {
-        showNotice("Server error: DATABASE", "error", true);
-      } else {
-        showNotice(
-          `Login failed: ${e?.message || "REQUEST_FAILED"}`,
-          "warn",
-          false,
-          5000
-        );
-      }
+      showNotice(
+        `Login failed: ${e.message || "REQUEST_FAILED"}`,
+        "warn",
+        false,
+        5000
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut({ redirect: false });
     setUser(null);
     setCurrentView("start");
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("pcc_user_phone");
-      localStorage.removeItem("pcc_user_pin");
-    }
     showNotice("Signed out", "success", false, 3000);
   };
 
@@ -334,7 +304,8 @@ export default function BoothPage() {
       case "Coupon":
         return (
           <div className="flex flex-col items-center gap-4 w-full max-w-[720px]">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+            Logged in as: {session?.user?.name || "Unknown"}
+            <div className="w-full">
               {promos.map((p) => (
                 <PromotionCard
                   key={p.code}
@@ -352,7 +323,6 @@ export default function BoothPage() {
                 />
               ))}
             </div>
-
             {/* Stripe PromptPay QR shows here when user clicked a promo */}
             {loadingPay && (
               <p className="text-sm opacity-70">Creating payment…</p>

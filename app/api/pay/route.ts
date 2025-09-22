@@ -62,7 +62,12 @@ export async function POST(req: Request) {
       amount: finalSatang,
       currency: process.env.CURRENCY || "thb",
       payment_method_types: ["promptpay"],
-      payment_method_data: { type: "promptpay" }, // ✅
+      payment_method_data: {
+        type: "promptpay",
+        billing_details: {
+          email: "puppup.2547.2015@gmail.com", // <- put user email if you have, else fallback
+        },
+      }, // ✅
       confirm: true, // ✅ confirm now to receive next_action
       metadata: {
         promo_code: String(promoCode),
