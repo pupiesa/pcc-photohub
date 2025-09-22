@@ -38,6 +38,7 @@ CORS_ALLOW_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:
 NEXT_PUBLIC_SMTP_BASE=http://localhost:4000
 NEXT_PUBLIC_MONGO_BASE=http://localhost:2000
 NEXT_PUBLIC_NC_BASE=http://localhost:1500
+MONGO_BASE_SERVER=http://localhost:2000
 
 #camera
 NEXT_PUBLIC_CAMERA_BASE=http://127.0.0.1:8080 # your camear ip using using usbcam.py or ref.py
@@ -49,5 +50,7 @@ PRINTER_NAME=My_Photo_Printer # run "lpstat -p -d" to see all printer
 
 #Sripe
 
-NEXT*PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test*
-STRIPE*SECRET_KEY=sk_test*
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_1234567890abcdef # safe to expose, used in client if needed
+STRIPE_SECRET_KEY=sk_test_1234567890abcdef # server-only
+STRIPE_WEBHOOK_SECRET=whsec_1234567890abcdef # from Stripe dashboard > Webhooks
+CURRENCY=thb

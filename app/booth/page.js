@@ -67,6 +67,27 @@ export default function BoothPage() {
   const hideTimerRef = useRef(null);
   const removeTimerRef = useRef(null);
   const progressTimerRef = useRef(null);
+  // ----------Promo + payment state --------
+  const [promos, setPromos] = useState([]);
+  const [selectedPromo, setSelectedPromo] = useState(null);
+  const [qrUrl, setQrUrl] = useState("");
+  const [piId, setPiId] = useState("");
+  const [payStatus, setPayStatus] = useState(""); // 'requires_payment_method' | 'processing' | 'succeeded' etc.
+  const [loadingPay, setLoadingPay] = useState(false);
+  const BASE_ORDER_AMOUNT = 50;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await client.listPromos({ active: true });
+        setPromos(
+          Array.isArray(result.data) ? result.data : result.data?.promos || []
+        );
+      } catch (e) {
+        console.error("Fetch promos failed:", e.message);
+      }
+    })();
+  }, []);
 
   const clearTimers = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -216,14 +237,86 @@ export default function BoothPage() {
     }
     showNotice("Signed out", "success", false, 3000);
   };
-  const handleRedeem = async () => {
+
+  const handleSelectPromo = async (promo) => {
     try {
-      const promos = await client.listPromos({ active: true }); // Fetch only active promos
-      console.log("Promotions:", promos);
-    } catch (error) {
-      console.error("Failed to fetch promotions:", error.message);
+      const orderAmount = BASE_ORDER_AMOUNT;
+      const res = await client.validatePromo(promo.code, {
+        userNumber: user?.phone,
+        orderAmount,
+      });
+      console.log("Validated promo:", res);
+      setSelectedPromo(promo);
+    } catch (e) {
+      console.error("Promo not valid:", e.message);
     }
   };
+  const handleRedeemPromo = async () => {
+    if (!selectedPromo) return;
+    try {
+      const res = await client.redeemPromo(selectedPromo.code, {
+        userNumber: user?.phone,
+        orderAmount: BASE_ORDER_AMOUNT,
+      });
+      console.log("Promo redeemed:", res);
+    } catch (e) {
+      console.error("Redeem failed:", e.message);
+    }
+  };
+  const startPayment = async (promo) => {
+    setLoadingPay(true);
+    setSelectedPromo(promo);
+    setQrUrl("");
+    setPiId("");
+    setPayStatus("");
+    try {
+      const r = await fetch("/api/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promoCode: promo.code,
+          userNumber: user?.phone, // you already set user { phone } on login:contentReference[oaicite:2]{index=2}
+          orderAmount: BASE_ORDER_AMOUNT, // THB amount before discount
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok)
+        throw new Error(data.message || "PAY_CREATE_FAILED");
+      setQrUrl(data.qr);
+      setPiId(data.paymentIntentId);
+      setPayStatus("requires_payment_method");
+    } catch (e) {
+      console.error("Create pay failed:", e.message);
+    } finally {
+      setLoadingPay(false);
+    }
+  };
+  useEffect(() => {
+    if (!piId) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/pay/${piId}`);
+        const d = await r.json();
+        if (d.ok) {
+          setPayStatus(d.status);
+          if (
+            d.status === "succeeded" ||
+            d.status === "canceled" ||
+            d.status === "requires_payment_method"
+          ) {
+            // stop polling on terminal states except "processing"
+            if (d.status !== "processing") stop = true;
+          }
+        }
+      } catch {}
+      if (!stop) setTimeout(tick, 2500);
+    };
+    tick();
+    return () => {
+      stop = true;
+    };
+  }, [piId]);
 
   const renderCurrentView = () => {
     switch (currentView) {
@@ -240,10 +333,48 @@ export default function BoothPage() {
         );
       case "Coupon":
         return (
-          <div className="flex flex-col items-center">
-            <PromotionCard couponCode="SAVE20" onRedeem={handleRedeem} />
+          <div className="flex flex-col items-center gap-4 w-full max-w-[720px]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+              {promos.map((p) => (
+                <PromotionCard
+                  key={p.code}
+                  couponCode={p.code}
+                  details={{
+                    type: p.type,
+                    value: p.value,
+                    startAt: p.start_at,
+                    endAt: p.end_at,
+                    usageLimit: p.usage_limit,
+                    usedCount: p.used_count,
+                    perUserLimit: p.per_user_limit,
+                  }}
+                  onRedeem={() => startPayment(p)}
+                />
+              ))}
+            </div>
+
+            {/* Stripe PromptPay QR shows here when user clicked a promo */}
+            {loadingPay && (
+              <p className="text-sm opacity-70">Creating payment…</p>
+            )}
+            {qrUrl && (
+              <div className="mt-4 p-4 rounded-xl border bg-white/80 dark:bg-gray-900/50">
+                <p className="text-sm font-medium mb-2 text-center">
+                  Scan with a Thai banking app (PromptPay)
+                </p>
+                <img
+                  src={qrUrl}
+                  alt="PromptPay QR"
+                  className="w-56 h-56 mx-auto"
+                />
+                <div className="text-xs text-center mt-2 opacity-70">
+                  Status: {payStatus || "—"}
+                </div>
+              </div>
+            )}
           </div>
         );
+
       case "photobooth":
         return (
           <div className="flex flex-col items-center">
