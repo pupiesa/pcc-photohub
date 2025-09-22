@@ -22,7 +22,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradient";
-import { Skeleton } from "@/components/ui/skeleton"; // เพิ่มสำหรับ skeleton กริด/รูป
+import { Skeleton } from "@/components/ui/skeleton";
+import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
@@ -207,6 +208,11 @@ function InlineEmailKeyboard({ visible, setValue, onDone }) {
   return (
     <div className="mt-3 rounded-xl border p-3 bg-muted/30">
       <div className="space-y-2">
+         <div className="flex gap-1  rounded-xl justify-start">
+          <Button variant="secondary" onClick={() => press("@gmail.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@gmail.com</Button>
+          <Button variant="secondary" onClick={() => press("@kmitl.ac.th")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@kmitl.ac.th</Button>
+          <Button variant="secondary" onClick={() => press("@@outlook.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@outlook.com</Button>
+        </div>
         {rows.map((row, idx) => (
           <div key={idx} className="flex gap-1 justify-center">
             {row.map((k) => (
@@ -216,10 +222,8 @@ function InlineEmailKeyboard({ visible, setValue, onDone }) {
             ))}
           </div>
         ))}
-        <div className="flex gap-1 justify-center">
-          <Button variant="secondary" onClick={() => press("@gmail.com")}>@gmail.com</Button>
-          <Button variant="secondary" onClick={() => press("@kmitl.ac.th")}>@kmitl.ac.th</Button>
-          <Button variant="outline" onClick={() => press("clear")}className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
+        <div className="flex gap-1 justify-end">
+          <Button variant="outline" onClick={() => press("clear")} className="bg-linear-65 from-red-700 to-red-700 text-white hover:opacity-80">ล้าง</Button>
           <Button variant="outline" onClick={() => press("back")}>⌫</Button>
         </div>
         <div className="flex justify-end">
@@ -576,7 +580,12 @@ export default function CustomerDashboard() {
                     setFlowError(null); setEmail(""); setConsent(false); setOtp("");
                     setStep("email"); setOpenEmailFlow(true); emailKbSuppressRef.current = false;
                   }}>ใส่/ยืนยันอีเมล</Button>
-                  <div className="text-xs text-gray-500 mt-1">สามารถดูรูปออนไลน์ได้หลังจากยืนยันอีเมลสำเร็จ</div>
+                   <GradientText
+                    className="text-xs text-gray-500 mt-1"
+                    text="*สามารถดูรูปออนไลน์ได้หลังจากยืนยันอีเมลสำเร็จ*"
+                    neon
+                    gradient="linear-gradient(90deg, #ff7e5f 0%, #2ae3e3ff 50%, #feb47b 100%)"
+                  />
                 </div>
               )}
             </div>
