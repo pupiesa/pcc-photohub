@@ -335,6 +335,7 @@ export default function BoothPage() {
     if (showPay) {
       const pct = Math.max(0, Math.min(100, (timeLeft / EXPIRE_SECONDS) * 100));
       const isExpired = timeLeft <= 0;
+      if (isExpired) { expireSessionNow(); }
       return (
         <div className="flex flex-col items-center justify-center flex-1 w-full">
           {qrUrl && (
