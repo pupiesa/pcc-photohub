@@ -1,7 +1,7 @@
 {
   "name": "print-api",
-  "version": "1.0.0",
-  "description": "print api for carpy pi4",
+  "version": "2.0.0",
+  "description": "print api and sound for crapy pi4",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

@@ -90,6 +90,13 @@ export default function PhotoboothInterface({ user, onLogout }) {
       if (!url) throw new Error("No image url returned");
       setCapturedImage(`${CAMERA_BASE}${url}?ts=${Date.now()}`);
       setCapturedServerPath(data?.serverPath || null);
+      try {
+          const res = await fetch(`${PRINT_BASE}/play/print.wav`);
+          const data = await res.json();
+          console.log("Sound play response:", data);
+      } catch (err) {
+          console.error(err);
+      }
     } catch (err) {
       console.error(err);
       alert("ถ่ายภาพไม่สำเร็จ");
@@ -144,10 +151,17 @@ export default function PhotoboothInterface({ user, onLogout }) {
             body: JSON.stringify({ paths: nextPaths }),
           });
           if (!apiRes.ok) {
-            console.error("Custom API call failed:", await apiRes.text());
+            console.error("Print API call failed:", await apiRes.text());
           }
         } catch (err) {
-          console.error("Error calling custom API:", err);
+          console.error("Error call Print API:", err);
+        }
+        try {
+          const res = await fetch(`${PRINT_BASE}/play/sing.wav`);
+          const data = await res.json();
+          console.log("Sound play response:", data);
+        } catch (err) {
+          console.error(err);
         }
         return;
       }
