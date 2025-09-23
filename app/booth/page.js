@@ -153,6 +153,10 @@ export default function BoothPage() {
     try {
       await client.ensureUserAndPin({ number: phone, pin });
       setUser({ phone });
+      if (typeof window !== "undefined") {
+        localStorage.setItem("pcc_user_phone", String(phone));
+        localStorage.setItem("pcc_user_pin", String(pin));
+      }
       setCurrentView("Coupon");
       resetPayUi();
       showNotice("Signed in", "success", false, 3000);
@@ -168,7 +172,16 @@ export default function BoothPage() {
     } finally { setBusy(false); }
   };
 
-  const handleLogout = () => { setUser(null); setCurrentView("start"); resetPayUi(); showNotice("Signed out", "success", false, 3000); };
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem("pcc_user_phone");
+      localStorage.removeItem("pcc_user_pin");
+    } catch {}
+    setUser(null);
+    setCurrentView("start");
+    resetPayUi();
+    showNotice("Signed out", "success", false, 3000);
+  };
 
   const mmss = (s) => {
     const mm = String(Math.floor(s / 60)).padStart(2, "0");

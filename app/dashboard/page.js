@@ -24,6 +24,8 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp
 import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradient";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
+import { Eye, EyeOff } from "lucide-react";
+
 
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
@@ -123,7 +125,7 @@ function useInfiniteInScrollArea({ rootRef, hasMore, loadMore, margin = "1000px"
   return { sentinelRef };
 }
 
-function GalleryScrollGrid({ gallery }) {
+function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
   const scrollRef = useRef(null);
   const [page, setPage] = useState(1);
   const visible = useMemo(() => gallery.slice(0, page * PAGE_SIZE), [gallery, page]);
@@ -134,28 +136,20 @@ function GalleryScrollGrid({ gallery }) {
     rootRef: scrollRef,
     hasMore,
     loadMore,
-    margin: "1000px",
+    margin: "1200px",
   });
 
   return (
-    <ScrollArea ref={scrollRef} className="h-[46vh] pr-2">
+    <ScrollArea ref={scrollRef} className={`${heightClass} pr-2`}>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {visible.map((it, idx) => (
           <PhotoCard
             key={`${it.name || it.path || "item"}-${idx}`}
             item={it}
-            priority={idx < 8} // รูปชุดแรก ๆ โหลดแบบ eager
           />
         ))}
-
-        {hasMore &&
-          Array.from({ length: 6 }).map((_, i) => (
-            <div key={`sk-${i}`} className="rounded-lg border border-gray-200 dark:border-gray-700">
-              <div className="w-full aspect-square bg-gray-300/10 dark:bg-gray-700/30 animate-pulse" />
-            </div>
-          ))}
       </div>
-      <div ref={sentinelRef} className="h-4 w-full" />
+      <div ref={sentinelRef} className="h-6 w-full" />
     </ScrollArea>
   );
 }
@@ -239,6 +233,9 @@ export default function CustomerDashboard() {
   const router = useRouter();
 
   const [phone, setPhone] = useState(null);
+  const [pin, setPin] = useState(null);           // เพิ่มอ่าน PIN จาก localStorage
+  const [showPin, setShowPin] = useState(false);  // ปุ่มโชว์/ซ่อน PIN
+
   const [gallery, setGallery] = useState([]);
   const [summary, setSummary] = useState({ count: 0, link: null, hasEmail: false, displayName: null });
   const [loading, setLoading] = useState(true);
@@ -258,7 +255,7 @@ export default function CustomerDashboard() {
   const [otpSecsLeft, setOtpSecsLeft] = useState(OTP_TOTAL_SECS);
   const [canResend, setCanResend] = useState(false);
   const [otpTimerKey, setOtpTimerKey] = useState(0);
-  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25; //progress bar  25 sec blink red color
+  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25; //progress bar 25 sec blink red color
 
   // soft keyboards
   const [showEmailKb, setShowEmailKb] = useState(false);
@@ -272,11 +269,13 @@ export default function CustomerDashboard() {
     try { if (el?.setSelectionRange) el.setSelectionRange(0, el.value?.length ?? 0); } catch {}
   };
 
+  // ✅ อ่าน phone/pin จาก localStorage; ไม่เด้งกลับ /booth ถ้าไม่มีค่า
   useEffect(() => {
     const p = typeof window !== "undefined" ? localStorage.getItem("pcc_user_phone") : null;
-    if (!p) { router.replace("/booth"); return; }
-    setPhone(p);
-  }, [router]);
+    const pn = typeof window !== "undefined" ? localStorage.getItem("pcc_user_pin") : null;
+    if (p) setPhone(p);
+    if (pn) setPin(pn);
+  }, []); // คงที่เสมอ
 
   const load = async (p) => {
     setLoading(true); setError(null);
@@ -509,7 +508,6 @@ export default function CustomerDashboard() {
       <div className="w-full max-w-5xl px-4 flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold tracking-tight">My Gallery</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={goBack}>Back</Button>
           <Button variant="outline" onClick={refresh} disabled={loading}>
             {loading ? (<><Loader size={16} className="mr-2" />Loading…</>) : ("Refresh")}
           </Button>
@@ -529,10 +527,10 @@ export default function CustomerDashboard() {
           <CardContent>
             {loading ? (
               <div className="space-y-3">
-                <div className="text-sm text-gray-500">Loading gallery…</div>
+                <div className="h-[15vh] text-sm text-gray-500">Loading gallery…</div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <Skeleton key={i} className="w-full aspect-square rounded-lgdsdsd" />
+                    <Skeleton key={i} className="w-full aspect-square rounded-lg" />
                   ))}
                 </div>
               </div>
@@ -541,7 +539,7 @@ export default function CustomerDashboard() {
             ) : gallery.length === 0 ? (
               <div className="text-sm text-gray-500">No photos</div>
             ) : (
-              <GalleryScrollGrid gallery={gallery} />
+              <GalleryScrollGrid gallery={gallery} heightClass="h-[50vh]" />
             )}
           </CardContent>
         </Card>
@@ -557,6 +555,29 @@ export default function CustomerDashboard() {
               <div className="text-gray-500 dark:text-gray-400">Phone</div>
               <div className="font-medium">{phone || "-"}</div>
             </div>
+
+            {/* PIN */}
+            <div className="text-sm">
+              <div className="text-gray-500 dark:text-gray-400">Pin</div>
+             <div className="font-medium flex items-center gap-2">
+                <span className="font-mono tracking-wider select-none">
+                  {pin ? (showPin ? pin : "••••••") : "-"}
+                </span>
+
+                {pin && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setShowPin((v) => !v)}
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                    className="h-8 w-8 shadow-lg shadow-cyan-500 hover:shadow-purple-500 hover:opacity-80"
+                  >
+                    {showPin ? <Eye className="h-4 w-4 text-green-700 " /> : <EyeOff className="h-4 w-4 text-red-700" />}
+                  </Button>
+                )}
+              </div>
+            </div>
+
             <div className="text-sm">
               <div className="text-gray-500 dark:text-gray-400">Total Photos</div>
               <div className="font-medium">{summary.count}</div>
