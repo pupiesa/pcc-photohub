@@ -31,6 +31,16 @@ export default function StripeDashboardPage() {
   async function load() {
     setLoading(true);
     try {
+      // Prefer application DB paysessions endpoint
+      const resDb = await fetch(`/api/paysessions?days=${days}&limit=50`);
+      if (resDb.ok) {
+        const j = await resDb.json();
+        setPayments(j.items || []);
+        setRevenue(j.series || []);
+        return;
+      }
+
+      // If DB route not available, fall back to Stripe API endpoints
       const [resP, resR] = await Promise.all([
         fetch(`/api/stripe/payments?limit=50`),
         fetch(`/api/stripe/revenue?days=${days}`),
@@ -39,14 +49,9 @@ export default function StripeDashboardPage() {
       const p = resP.ok ? await resP.json() : { error: await resP.text() };
       const r = resR.ok ? await resR.json() : { error: await resR.text() };
 
-      if (p.error) {
-        console.error("/api/stripe/payments error:", p.error);
-      }
-      if (r.error) {
-        console.error("/api/stripe/revenue error:", r.error);
-      }
+      if (p.error) console.error("/api/stripe/payments error:", p.error);
+      if (r.error) console.error("/api/stripe/revenue error:", r.error);
 
-      // If the revenue response is empty but no error, log the raw response for debugging
       if (!r.error && (!r.series || r.series.length === 0)) {
         console.warn("/api/stripe/revenue returned empty series:", r);
       }
