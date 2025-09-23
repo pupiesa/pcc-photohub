@@ -67,6 +67,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
   }, [pathname]);
 
   const startPhotoshoot = () => {
+    fetch(`${PRINT_BASE}/play/321.wav`);
     let count = 3;
     setCountdown(count);
     const timer = setInterval(() => {
@@ -90,13 +91,6 @@ export default function PhotoboothInterface({ user, onLogout }) {
       if (!url) throw new Error("No image url returned");
       setCapturedImage(`${CAMERA_BASE}${url}?ts=${Date.now()}`);
       setCapturedServerPath(data?.serverPath || null);
-      try {
-          const res = await fetch(`${PRINT_BASE}/play/print.wav`);
-          const data = await res.json();
-          console.log("Sound play response:", data);
-      } catch (err) {
-          console.error(err);
-      }
     } catch (err) {
       console.error(err);
       alert("ถ่ายภาพไม่สำเร็จ");
@@ -156,13 +150,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
         } catch (err) {
           console.error("Error call Print API:", err);
         }
-        try {
-          const res = await fetch(`${PRINT_BASE}/play/sing.wav`);
-          const data = await res.json();
-          console.log("Sound play response:", data);
-        } catch (err) {
-          console.error(err);
-        }
+        fetch(`${PRINT_BASE}/play/321.wav`);
         return;
       }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useEffect , useRef} from "react";
 import { client } from "@/lib/photoboothClient"; // ใช้ ensureUserAndPin / getUserByNumber
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -11,6 +12,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Phone, Shield, UserPlus } from "lucide-react";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader"; // ใช้ Loader ตามที่ต้องการ
+
+const PRINT_HOST = (process.env.PRINT_API_HOST || "127.0.0.1");
+const PRINT_PORT = (process.env.PRINT_API_PORT || "5000")
+const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
 
 /**
  * props:
@@ -26,6 +31,12 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
   const [step, setStep] = useState("phone"); // "phone" | "otp" | "otpConfirm"
   const [isLoading, setIsLoading] = useState(false);
   const [errMsg, setErrMsg] = useState("");
+  const hasPlayedSound = useRef(false);
+  
+  if (!hasPlayedSound.current) {
+    fetch(`${PRINT_BASE}/play/phone.wav`);
+    hasPlayedSound.current = true; 
+  }
 
   const formatPhoneDisplay = (phone) => {
     if (phone.length <= 3) return phone;
@@ -34,6 +45,7 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
   };
 
   const handlePhoneSubmit = async () => {
+    fetch(`${PRINT_BASE}/play/pass.wav`);
     if (phoneNumber.length < 10) return;
     setIsLoading(true);
     setErrMsg("");
@@ -73,6 +85,7 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
       }
       onLogin?.({ phone: phoneNumber, pin, mode: "signup" });
     }
+    
   };
 
   const handleNumberPad = (digit) => {
