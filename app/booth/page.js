@@ -10,6 +10,10 @@ import PhoneLoginCard from "@/components/PhoneLoginCard";
 import PhotoboothInterface from "@/components/PhotoboothInterface";
 import ForgotPinDialog from "@/components/ForgotPinDialog";
 
+const PRINT_HOST = (process.env.PRINT_API_HOST || "127.0.0.1");
+const PRINT_PORT = (process.env.PRINT_API_PORT || "5000")
+const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
+
 const WARP_CONFIG = { perspective: 150, beamsPerSide: 4, beamSize: 5, beamDuration: 1 };
 
 const MONGO_BASE = process.env.NEXT_PUBLIC_MONGO_BASE || "";
@@ -222,6 +226,7 @@ export default function BoothPage() {
         resetPayUi();
         return;
       }
+      fetch(`${PRINT_BASE}/play/pay.wav`);
 
       setQrUrl(data.qr);
       setPiId(data.paymentIntentId);

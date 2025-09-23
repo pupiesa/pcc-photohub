@@ -45,7 +45,6 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
   };
 
   const handlePhoneSubmit = async () => {
-    fetch(`${PRINT_BASE}/play/pass.wav`);
     if (phoneNumber.length < 10) return;
     setIsLoading(true);
     setErrMsg("");
@@ -53,9 +52,11 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
       // เช็คว่ามี user ไหม เพื่อกำหนดโฟลว์
       await client.getUserByNumber(phoneNumber);
       setMode("login");
+      fetch(`${PRINT_BASE}/play/pass.wav`);
     } catch (e) {
       if (e?.status === 404) {
         setMode("signup");
+        fetch(`${PRINT_BASE}/play/createpass.wav`);
       } else {
         setErrMsg("Unable to check user. Please try again.");
         setIsLoading(false);
@@ -71,8 +72,10 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
       if (pin.length !== 6) return;
       if (mode === "signup") {
         setStep("otpConfirm"); // ให้ยืนยัน PIN อีกรอบ
+        fetch(`${PRINT_BASE}/play/passagain.wav`);
       } else {
         onLogin?.({ phone: phoneNumber, pin, mode: "login" });
+        fetch(`${PRINT_BASE}/play/promo.wav`);
       }
       return;
     }
@@ -80,10 +83,12 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
       if (pin2.length !== 6) return;
       if (pin !== pin2) {
         setErrMsg("PINs do not match. Please try again.");
+        fetch(`${PRINT_BASE}/play/passagainwrong.wav`);
         setPin2("");
         return;
       }
       onLogin?.({ phone: phoneNumber, pin, mode: "signup" });
+      fetch(`${PRINT_BASE}/play/promo.wav`);
     }
     
   };
