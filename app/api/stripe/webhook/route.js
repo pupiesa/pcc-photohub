@@ -5,20 +5,28 @@ import { dbConnect, PaySession } from "@/lib/db";
 
 async function redeemPromoOnMongo({ code, userNumber, orderAmount }) {
   const base = process.env.NEXT_PUBLIC_MONGO_BASE?.replace(/\/$/, "");
-  if (!base || !code || !userNumber) return { ok: false, message: "MONGO_BASE_OR_DATA_MISSING" };
+  if (!base || !code || !userNumber)
+    return { ok: false, message: "MONGO_BASE_OR_DATA_MISSING" };
 
-  const r = await fetch(`${base}/api/promos/${encodeURIComponent(code)}/redeem`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userNumber, orderAmount }),
-    cache: "no-store",
-  });
+  const r = await fetch(
+    `${base}/api/promos/${encodeURIComponent(code)}/redeem`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userNumber, orderAmount }),
+      cache: "no-store",
+    }
+  );
   const data = await r.json().catch(() => ({}));
-  return r.ok && data?.ok !== false ? { ok: true, data } : { ok: false, data, status: r.status };
+  return r.ok && data?.ok !== false
+    ? { ok: true, data }
+    : { ok: false, data, status: r.status };
 }
 
 export async function POST(req) {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: "2024-06-20",
+  });
   const sig = req.headers.get("stripe-signature");
 
   try {
@@ -45,10 +53,16 @@ export async function POST(req) {
         if (sess && !sess.redeemed) {
           const code = (pi.metadata?.promo_code || "").trim();
           const userNumber = (pi.metadata?.user_number || "").trim();
-          const orderAmount = Number(pi.metadata?.original_thb || sess.originalAmountTHB || 50);
+          const orderAmount = Number(
+            pi.metadata?.original_thb || sess.originalAmountTHB || 50
+          );
 
           if (code && userNumber) {
-            const res = await redeemPromoOnMongo({ code, userNumber, orderAmount });
+            const res = await redeemPromoOnMongo({
+              code,
+              userNumber,
+              orderAmount,
+            });
             await PaySession.updateOne(
               { _id: sess._id },
               { redeemed: !!res.ok, redeemAt: new Date(), redeemResult: res }
@@ -57,7 +71,11 @@ export async function POST(req) {
             // ไม่มีคูปอง ก็ข้ามไป
             await PaySession.updateOne(
               { _id: sess._id },
-              { redeemed: false, redeemAt: new Date(), redeemResult: { ok: false, message: "NO_PROMO_TO_REDEEM" } }
+              {
+                redeemed: false,
+                redeemAt: new Date(),
+                redeemResult: { ok: false, message: "NO_PROMO_TO_REDEEM" },
+              }
             );
           }
         }
