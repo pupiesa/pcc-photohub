@@ -118,7 +118,7 @@ export default function StripeDashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">
-              {totalThisPeriod.toLocaleString()}
+              {totalThisPeriod.toLocaleString()} Bath
             </div>
             {totalThisPeriod === 0 && (
               <div className="text-xs text-rose-600 mt-2">
