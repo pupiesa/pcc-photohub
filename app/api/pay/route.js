@@ -24,19 +24,26 @@ async function validatePromoViaMongoApi({ code, userNumber, orderAmount }) {
   }
 }
 
-// รองรับ percent/fixed
-function computeDiscountTHB(baseTHB, promoDoc) {
-  if (!promoDoc) return 0;
-  const t = promoDoc.type;
-  const v = Number(promoDoc.value || 0);
-  if (t === "percent") {
-    const cut = Math.floor((baseTHB * Math.max(0, Math.min(100, v))) / 100);
-    return Math.max(0, Math.min(cut, baseTHB));
+// --- redeem promo (ใช้เมื่อ finalTHB = 0) ---
+async function redeemPromoOnMongo({ code, userNumber, orderAmount }) {
+  try {
+    const base = process.env.NEXT_PUBLIC_MONGO_BASE?.replace(/\/$/, "");
+    if (!base || !code || !userNumber) {
+      return { ok: false, message: "MONGO_BASE_OR_DATA_MISSING" };
+    }
+    const r = await fetch(`${base}/api/promos/${encodeURIComponent(code)}/redeem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userNumber, orderAmount }),
+      cache: "no-store",
+    });
+    const data = await r.json().catch(() => ({}));
+    return r.ok && data?.ok !== false
+      ? { ok: true, data }
+      : { ok: false, data, status: r.status };
+  } catch (e) {
+    return { ok: false, message: e.message || "REDEEM_ERROR" };
   }
-  if (t === "fixed" || t === "amount") {
-    return Math.max(0, Math.min(v, baseTHB));
-  }
-  return 0;
 }
 
 const toSatang = (t) => Math.max(0, Math.round(Number(t) * 100));
@@ -90,13 +97,61 @@ export async function POST(req) {
         discountTHB = disc;
         finalTHB = after;
       } else {
-        const promoDoc = validated?.data?.promo;
-        discountTHB = computeDiscountTHB(BASE_THB, promoDoc);
-        finalTHB = Math.max(0, BASE_THB - discountTHB);
+        // ปิดเคสเก่า: ถ้าไม่มี pricing ให้ถือว่าไม่ลด (กัน edge case)
+        discountTHB = 0;
+        finalTHB = BASE_THB;
       }
     }
 
-    // Stripe PI (PromptPay)
+    // กรณีคูปองทำให้ยอดสุดท้าย = 0 → ข้าม Stripe, mark succeeded + redeem คูปองทันที
+    if (finalTHB <= 0) {
+      const sessionId = uuidv4();
+
+      // สร้าง PaySession แบบ “ฟรี”
+      const created = await PaySession.create({
+        sessionId,
+        userNumber,
+        promoCode: promoCode || null,
+        originalAmountTHB: BASE_THB,
+        discountAmountTHB: Math.max(discountTHB, BASE_THB),
+        finalAmountTHB: 0,
+        paymentIntentId: null,
+        status: "succeeded",
+        expiresAt: null,
+        expired: false,
+        expiredAt: null,
+        raw: { free: true },
+      });
+
+      //redeem คูปองทันที (เพราะไม่มี webhook จาก Stripe)
+      let redeemResult = { ok: false, message: "NO_PROMO_TO_REDEEM" };
+      if (promoCode) {
+        redeemResult = await redeemPromoOnMongo({
+          code: promoCode,
+          userNumber,
+          orderAmount: BASE_THB,
+        });
+        await PaySession.updateOne(
+          { _id: created._id },
+          { redeemed: !!redeemResult.ok, redeemAt: new Date(), redeemResult }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        sessionId,
+        paymentIntentId: null,
+        amountTHB: 0,
+        qr: null,
+        clientSecret: null,
+        expiresAt: null,
+        expireSeconds: 0,
+        free: true,
+        redeemed: !!redeemResult.ok,
+      });
+    }
+
+    //มียอดจริง → สร้าง PromptPay (Stripe)
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
     const sessionId = uuidv4();
     const expiresAt = new Date(Date.now() + EXPIRE_SECONDS * 1000);
@@ -129,7 +184,6 @@ export async function POST(req) {
       na?.promptpay_display_qr_code?.image_url_png ||
       null;
 
-    // save session (+ expiresAt)
     await PaySession.create({
       sessionId,
       userNumber,

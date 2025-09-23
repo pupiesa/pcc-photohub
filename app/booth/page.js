@@ -9,7 +9,6 @@ import StartCard from "@/components/IndexCard";
 import PhoneLoginCard from "@/components/PhoneLoginCard";
 import PhotoboothInterface from "@/components/PhotoboothInterface";
 import ForgotPinDialog from "@/components/ForgotPinDialog";
-import PromotionCard from "@/components/promotionCard";
 
 const WARP_CONFIG = { perspective: 150, beamsPerSide: 4, beamSize: 5, beamDuration: 1 };
 
@@ -21,7 +20,8 @@ const RETRY_MS = 30000;
 const PROG_TICK = 100;
 const PROG_STEP = 100 / (RETRY_MS / PROG_TICK);
 const BASE_ORDER_AMOUNT = 50;
-const EXPIRE_SECONDS = 120; // ✅ นับถอยหลัง 120 วิ
+const EXPIRE_SECONDS = 120;
+const AUTO_REDEEM_LEN = 8; // ล็อก 8 ตัว + auto-redeem เมื่อครบ
 
 function SuccessTick() {
   return (
@@ -63,7 +63,7 @@ export default function BoothPage() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotPhone, setForgotPhone] = useState("");
 
-  // Notice/Toast
+  // Toast
   const [notice, setNotice] = useState(null);
   const [noticeVisible, setNoticeVisible] = useState(false);
   const [progress, setProgress] = useState(100);
@@ -94,8 +94,7 @@ export default function BoothPage() {
   const clearNotice = () => { clearTimers(); setNoticeVisible(false); setTimeout(() => setNotice(null), 700); };
   useEffect(() => () => clearTimers(), []);
 
-  // Promo + payment state
-  const [promos, setPromos] = useState([]);
+  // Payment
   const [qrUrl, setQrUrl] = useState("");
   const [piId, setPiId] = useState("");
   const [payStatus, setPayStatus] = useState("");
@@ -112,19 +111,6 @@ export default function BoothPage() {
     setTimeLeft(0);
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
   };
-
-  // load promos
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await client.listPromos({ active: true });
-        setPromos(Array.isArray(result.data) ? result.data : result.data?.promos || []);
-      } catch (e) {
-        console.error("Fetch promos failed:", e.message);
-        showNotice("โหลดคูปองไม่สำเร็จ", "warn", false, 4000);
-      }
-    })();
-  }, []);
 
   // monitor upstreams
   const [isOffline, setIsOffline] = useState(false);
@@ -152,11 +138,10 @@ export default function BoothPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [MONGO_BASE, NC_BASE, CAMERA_BASE, isOffline]);
 
-  // route helpers
+  // routes
   const handleStartClick = () => { setCurrentView("login"); resetPayUi(); };
   const handleBackToStart = () => { setCurrentView("start"); resetPayUi(); };
 
-  // ถ้าชำระเงินไม่สำเร็จ → แจ้ง 5 วิ แล้วกลับ login
   const backToLoginOnFail = (msg = "ชำระเงินไม่สำเร็จ กรุณาลองใหม่") => {
     showNotice(msg, "error", false, 5000);
     setCurrentView("login");
@@ -185,52 +170,26 @@ export default function BoothPage() {
 
   const handleLogout = () => { setUser(null); setCurrentView("start"); resetPayUi(); showNotice("Signed out", "success", false, 3000); };
 
-  // helper แปลงวินาทีเป็น mm:ss
   const mmss = (s) => {
     const mm = String(Math.floor(s / 60)).padStart(2, "0");
     const ss = String(s % 60).padStart(2, "0");
     return `${mm}:${ss}`;
   };
 
-  // หมดเวลา → ยกเลิก session ที่ backend
   const expireSessionNow = async () => {
-    if (!piId) return;
+    if (!piId) { backToLoginOnFail("หมดเวลา กรุณาลองใหม่"); return; }
     try { await fetch(`/api/pay/${piId}`, { method: "DELETE" }); } catch {}
     backToLoginOnFail("หมดเวลา 120 วินาที กรุณาลองใหม่");
   };
 
-  // --- เริ่มจ่าย (validate + popup + แสดง QR + start countdown) ---
-  const startPayment = async (codeOrPromo) => {
+  // ============ Payment start ============
+  const startPayment = async (code) => {
     if (!user?.phone) { showNotice("กรุณาเข้าสู่ระบบก่อน", "warn", false, 3000); return; }
 
     setLoadingPay(true);
     setQrUrl(""); setPiId(""); setPayStatus("");
-
     try {
-      const couponCode = typeof codeOrPromo === "string" ? codeOrPromo.trim() : codeOrPromo?.code;
-
-      let before = BASE_ORDER_AMOUNT;
-      let discount = 0;
-      let after = BASE_ORDER_AMOUNT;
-
-      if (couponCode) {
-        try {
-          const v = await client.validatePromo(couponCode, {
-            userNumber: user?.phone,
-            orderAmount: BASE_ORDER_AMOUNT,
-          });
-          const pricing = v?.data?.pricing || {};
-          before = Number(pricing.amount_before ?? BASE_ORDER_AMOUNT);
-          discount = Math.max(0, Number(pricing.discount_amount || 0));
-          after = Math.max(0, Number(pricing.amount_after ?? before - discount));
-          showNotice(`ใช้คูปองสำเร็จ • ลด ฿${discount} จาก ฿${before} → เหลือ ฿${after}`, "success", false, 3000);
-        } catch {
-          showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 4000);
-          return;
-        }
-      } else {
-        showNotice(`ไม่มีคูปอง • ยอดสุทธิ ฿${BASE_ORDER_AMOUNT}`, "success", false, 2200);
-      }
+      const couponCode = (typeof code === "string" ? code : "")?.trim();
 
       const r = await fetch("/api/pay", {
         method: "POST",
@@ -244,16 +203,18 @@ export default function BoothPage() {
       const data = await r.json();
       if (!r.ok || !data.ok) throw new Error(data.message || "PAY_CREATE_FAILED");
 
-      setQrUrl(data.qr);
-      setPiId(data.paymentIntentId);
-      setPayStatus("requires_payment_method");
-      setShowPay(true);
-
-      if (typeof data.amountTHB === "number") {
-        showNotice(`ยอดเรียกเก็บจริง ฿${data.amountTHB}`, "success", false, 2500);
+      if (Number(data.amountTHB) === 0) {
+        showNotice("ใช้คูปองแล้ว ไม่ต้องจ่าย • ไปขั้นตอนถัดไป", "success", false, 2600);
+        setCurrentView("photobooth");
+        resetPayUi();
+        return;
       }
 
-      // start 120s countdown
+      setQrUrl(data.qr);
+      setPiId(data.paymentIntentId);
+      setPayStatus("requires_action");
+      setShowPay(true);
+
       setTimeLeft(EXPIRE_SECONDS);
       if (countdownRef.current) clearInterval(countdownRef.current);
       countdownRef.current = setInterval(() => {
@@ -261,22 +222,64 @@ export default function BoothPage() {
           if (t <= 1) {
             clearInterval(countdownRef.current);
             countdownRef.current = null;
-            // หมดเวลา → expire session
-            expireSessionNow();
+            expireSessionNow(); // auto-cancel
             return 0;
           }
           return t - 1;
         });
       }, 1000);
     } catch (e) {
-      console.error("Create pay failed:", e.message);
+      console.error("Create pay failed:", e);
       backToLoginOnFail("สร้างการชำระเงินไม่สำเร็จ");
     } finally {
       setLoadingPay(false);
     }
   };
+  // ============ Payment end ============
 
-  // Poll สถานะ (สําเร็จ/ล้มเหลว)
+  // ===== Coupon UI (focus + lock 8 + auto-redeem) =====
+  const [couponInput, setCouponInput] = useState("");
+  const couponRef = useRef(null);
+  const autoTimerRef = useRef(null);
+  const autoFiredRef = useRef(false);
+
+  // โฟกัสอัตโนมัติเมื่อเข้าหน้าคูปอง (และไม่ได้อยู่หน้า QR)
+  useEffect(() => {
+    if (currentView === "Coupon" && !showPay) {
+      requestAnimationFrame(() => couponRef.current?.focus({ preventScroll: true }));
+    }
+  }, [currentView, showPay]);
+
+  const onCouponChange = (v) => {
+    // อนุญาตเฉพาะ A-Z 0-9 และล็อกความยาว 8 ตัว
+    const filtered = v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, AUTO_REDEEM_LEN);
+    setCouponInput(filtered);
+
+    if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
+
+    // ครบ 8 ตัวพอดี → auto-validate แล้วเริ่มชำระ
+    if (filtered.length === AUTO_REDEEM_LEN && !autoFiredRef.current) {
+      autoFiredRef.current = true;
+      autoTimerRef.current = setTimeout(async () => {
+        try {
+          await client.validatePromo(filtered, {
+            userNumber: user?.phone,
+            orderAmount: BASE_ORDER_AMOUNT,
+          }); // ใช้ SDK เดิมในการตรวจคูปอง :contentReference[oaicite:2]{index=2}
+          await startPayment(filtered);
+        } catch {
+          showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);
+          autoFiredRef.current = false;
+        }
+      }, 120);
+    } else {
+      autoFiredRef.current = false; // ถ้าลดความยาวลง ให้พร้อมยิงใหม่เมื่อครบ 8
+    }
+  };
+
+  useEffect(() => () => { if (autoTimerRef.current) clearTimeout(autoTimerRef.current); }, []);
+
+  // Poll สถานะ
   useEffect(() => {
     if (!piId) return;
     let stop = false;
@@ -286,7 +289,6 @@ export default function BoothPage() {
         const d = await r.json();
         if (d.ok) {
           setPayStatus(d.status);
-
           if (d.status === "succeeded") {
             showNotice("ชำระเงินสำเร็จ", "success", false, 3000);
             if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
@@ -315,38 +317,40 @@ export default function BoothPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [piId]);
 
-  // UI โค้ดคูปอง/QR
+  // Coupon/Payment UI
   const renderCouponOrPayment = () => {
     if (showPay) {
       const pct = Math.max(0, Math.min(100, (timeLeft / EXPIRE_SECONDS) * 100));
+      const isExpired = timeLeft <= 0;
       return (
         <div className="flex flex-col items-center justify-center flex-1 w-full">
-          {loadingPay && <p className="text-sm opacity-70">Creating payment…</p>}
           {qrUrl && (
-            <div className="mt-2 p-5 rounded-2xl border bg-white/90 dark:bg-gray-900/70 shadow-md w-[320px]">
+            <div className="mt-2 p-4 rounded-2xl border bg-white/90 dark:bg-gray-900/70 shadow-md w-[340px]">
               <p className="text-sm font-medium mb-3 text-center">สแกนด้วยแอปธนาคาร (PromptPay)</p>
-              <img src={qrUrl} alt="PromptPay QR" className="w-64 h-64 mx-auto" />
+              <img src={qrUrl} alt="PromptPay QR" className="w-60 h-60 mx-auto" />
               <div className="mt-3">
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="opacity-70">หมดเวลาใน</span>
+                  <span className="opacity-70">{isExpired ? "หมดเวลา" : "หมดเวลาใน"}</span>
                   <span className="font-semibold">{mmss(timeLeft)}</span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
                   <div
-                    className="h-2 bg-gradient-to-r from-rose-400 via-amber-400 to-emerald-400"
+                    className={`h-2 ${isExpired ? "bg-red-500" : "bg-gradient-to-r from-rose-400 via-amber-400 to-emerald-400"}`}
                     style={{ width: `${pct}%`, transition: "width 1s linear" }}
                   />
                 </div>
               </div>
               <div className="text-xs text-center mt-2 opacity-70">Status: {payStatus || "—"}</div>
 
-              {/* ปุ่มยกเลิกเองก่อนหมดเวลา */}
               <button
                 onClick={expireSessionNow}
-                className="mt-3 w-full py-2 text-sm rounded-md border border-rose-300 bg-rose-50 hover:bg-rose-100 dark:bg-rose-900/20 dark:hover:bg-rose-900/30 transition"
+                className={`mt-3 w-full py-2 text-sm rounded-md border transition
+                ${isExpired
+                  ? "border-rose-400 bg-rose-100/80 dark:bg-rose-900/30 hover:bg-rose-100"
+                  : "border-rose-300 bg-rose-50 hover:bg-rose-100 dark:bg-rose-900/20 dark:hover:bg-rose-900/30"}`}
                 title="ยกเลิกการชำระเงิน"
               >
-                ยกเลิกการชำระเงิน
+                {isExpired ? "หมดเวลา — กดยกเลิก" : "ยกเลิกการชำระเงิน"}
               </button>
             </div>
           )}
@@ -355,35 +359,48 @@ export default function BoothPage() {
     }
 
     return (
-      <div className="flex flex-col items-center gap-4 w-full max-w-[720px]">
-        Logged in as: {user?.phone || "Unknown"}
-        <div className="w-full">
-          {promos.map((p) => (
-            <PromotionCard
-              key={p.code}
-              details={{
-                type: p.type, value: p.value,
-                startAt: p.start_at, endAt: p.end_at,
-                usageLimit: p.usage_limit, usedCount: p.used_count,
-                perUserLimit: p.per_user_limit,
-              }}
-              onRedeem={(code) => startPayment(code)}
-            />
-          ))}
+      <div className="flex flex-col items-center gap-4 w-full ">
+        <div className="w-full max-w-[360px] rounded-2xl border bg-blue/10 backdrop-blur p-3 shadow-sm ring ring-pink-500 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-900 shadow-2xl">
+          <label className="block text-xs mb-1.5 opacity-80">Coupon</label>
+          <input
+            ref={couponRef}
+            className="w-full h-10 rounded-lg border bg-blue-100 dark:bg-white/5 px-3 text-sm outline-none tracking-widest text-center "
+            placeholder="_ _ _ _ _ _ _ _"
+            value={couponInput}
+            onChange={(e) => onCouponChange(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && couponInput.length === AUTO_REDEEM_LEN) startPayment(couponInput); }}
+            maxLength={AUTO_REDEEM_LEN}
+            inputMode="latin"
+            autoCapitalize="characters"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => startPayment(couponInput)}
+              disabled={loadingPay || couponInput.length !== AUTO_REDEEM_LEN}
+              className={`flex-1 h-9 rounded-lg text-sm font-medium transition
+                ${loadingPay || couponInput.length !== AUTO_REDEEM_LEN
+                  ? "bg-gray-300/50 dark:bg-gray-700/50 text-gray-500 cursor-not-allowed"
+                  : "bg-white/85 dark:bg-gray-800/85 border hover:bg-white dark:hover:bg-gray-800"}`}
+            >
+              Redeem Now
+            </button>
+          </div>
         </div>
-        <div className="w-full max-w-[320px]">
-          <button
-            onClick={() => startPayment(null)}
-            disabled={loadingPay}
-            className={`w-full py-2 px-4 rounded-md border text-sm font-medium transition
-              ${loadingPay
-                ? "bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed"
-                : "border-dashed border-gray-400 hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
-            title="ไม่มีคูปอง กดข้ามไปชำระเงิน"
-          >
-            ไม่มีคูปอง — ข้ามไปชำระเงินเลย
-          </button>
-        </div>
+
+        <button
+          onClick={() => startPayment("")}
+          disabled={loadingPay}
+          className={`w-full max-w-[320px] py-2 px-4 rounded-md border text-sm font-medium transition
+            ${loadingPay
+              ? "bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed"
+              : "border-dashed border-gray-400 hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-cyan-500 shadow-lg shadow-cyan-500/50"}`}
+          title="ไม่มีคูปอง กดข้ามไปชำระเงิน"
+        >
+          ไม่มีคูปอง — ข้ามไปยังส่วนการชำระเงิน
+        </button>
       </div>
     );
   };
@@ -491,7 +508,7 @@ export default function BoothPage() {
         </div>
       )}
 
-      <div className="flex-1 flex justify-center mt-10 px-10">{renderCurrentView()}</div>
+      <div className="flex-1 flex justify-center mt-10 px-6">{renderCurrentView()}</div>
 
       <ForgotPinDialog
         open={forgotOpen}
