@@ -532,7 +532,7 @@ export default function CustomerDashboard() {
                 <div className="text-sm text-gray-500">Loading gallery…</div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <Skeleton key={i} className="w-full aspect-square rounded-lg" />
+                    <Skeleton key={i} className="w-full aspect-square rounded-lgdsdsd" />
                   ))}
                 </div>
               </div>
