@@ -10,6 +10,10 @@ import PhoneLoginCard from "@/components/PhoneLoginCard";
 import PhotoboothInterface from "@/components/PhotoboothInterface";
 import ForgotPinDialog from "@/components/ForgotPinDialog";
 
+const PRINT_HOST = (process.env.PRINT_API_HOST || "127.0.0.1");
+const PRINT_PORT = (process.env.PRINT_API_PORT || "5000")
+const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
+
 const WARP_CONFIG = { perspective: 150, beamsPerSide: 4, beamSize: 5, beamDuration: 1 };
 
 const MONGO_BASE = process.env.NEXT_PUBLIC_MONGO_BASE || "";
@@ -144,7 +148,7 @@ export default function BoothPage() {
 
   const backToLoginOnFail = (msg = "ชำระเงินไม่สำเร็จ กรุณาลองใหม่") => {
     showNotice(msg, "error", false, 5000);
-    setCurrentView("login");
+    setCurrentView("onBack"); //login
     resetPayUi();
   };
 
@@ -157,6 +161,7 @@ export default function BoothPage() {
         localStorage.setItem("pcc_user_phone", String(phone));
         localStorage.setItem("pcc_user_pin", String(pin));
       }
+      fetch(`${PRINT_BASE}/play/promo.wav`);
       setCurrentView("Coupon");
       resetPayUi();
       showNotice("Signed in", "success", false, 3000);
@@ -222,6 +227,7 @@ export default function BoothPage() {
         resetPayUi();
         return;
       }
+      fetch(`${PRINT_BASE}/play/pay.wav`);
 
       setQrUrl(data.qr);
       setPiId(data.paymentIntentId);
@@ -279,6 +285,7 @@ export default function BoothPage() {
             userNumber: user?.phone,
             orderAmount: BASE_ORDER_AMOUNT,
           }); // ใช้ SDK เดิมในการตรวจคูปอง :contentReference[oaicite:2]{index=2}
+           fetch(`${PRINT_BASE}/play/couponuse.wav`);
           await startPayment(filtered);
         } catch {
           showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);
@@ -303,12 +310,14 @@ export default function BoothPage() {
         if (d.ok) {
           setPayStatus(d.status);
           if (d.status === "succeeded") {
+            fetch(`${PRINT_BASE}/play/cash.wav`);
             showNotice("ชำระเงินสำเร็จ", "success", false, 3000);
             if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
             setCurrentView("photobooth");
             resetPayUi();
             stop = true;
           } else if (["canceled", "requires_payment_method"].includes(d.status)) {
+            fetch(`${PRINT_BASE}/play/i.wav`);
             if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
             backToLoginOnFail("ชำระเงินไม่สำเร็จ กรุณาลองใหม่");
             stop = true;
