@@ -145,37 +145,82 @@ app.post("/print", async (req, res) => {
 // 🔊 Play Sound API (cross-platform)
 app.get("/play/:file", (req, res) => {
   const fileName = req.params.file; // e.g., 'sing.wav'
-  
-  // Folder where your sounds live (default: ../sounds)
+
+  // Folder where your sounds live (default: ./effect)
   const soundFolder = process.env.SOUND_FOLDER || path.join(process.cwd(), "effect");
   const soundFile = path.join(soundFolder, fileName);
 
-  // Check if file exists
   if (!fs.existsSync(soundFile)) {
     return res.status(404).json({ error: `Sound file ${fileName} not found` });
   }
 
+  // --- helpers ---
+  const winFFplay = (() => {
+    const p = process.env.FFPLAY_PATH; 
+    if (p && fs.existsSync(p)) return p;
+    return "ffplay";
+  })();
+
   let command;
   let args = [];
 
-  if (process.platform === "darwin") {
-    command = "afplay";
-    args = [soundFile];
-  } else if (process.platform === "win32") {
-    command = "powershell";
-    args = ["-c", `(New-Object Media.SoundPlayer '${soundFile}').Play();`];
-  } else {
-    // Linux / Raspberry Pi
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    // Linux / Raspberry Pi → ใช้ aplay 
     command = "aplay";
     args = [soundFile];
+  } else if (process.platform === "darwin") {
+    command = "afplay";
+    args = [soundFile];
+  } else {
+    // Windows → พยายามใช้ ffplay
+    command = winFFplay;
+    args = ["-nodisp", "-autoexit", "-loglevel", "quiet", soundFile];
   }
 
-  // Spawn asynchronously
-  const child = spawn(command, args, { detached: true, stdio: "ignore" });
-  child.unref(); // allow the child process to run independently
+  // พยายามเล่นแบบ async
+  try {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
 
-  console.log(`🔊 Playing sound asynchronously: ${soundFile}`);
-  res.json({ message: `Playing ${fileName}`, file: soundFile });
+    console.log(`🔊 Playing sound asynchronously via ${command}: ${soundFile}`);
+    return res.json({ ok: true, player: command, file: soundFile });
+  } catch (err) {
+    const isWin = process.platform === "win32";
+    const triedFFplay =
+      isWin && typeof command === "string" && command.toLowerCase().includes("ffplay");
+
+    if (isWin && triedFFplay) {
+      try {
+        const psPath = soundFile.replace(/\\/g, "\\\\"); // escape backslash  PowerShell
+        const psArgs = [
+          "-NoProfile",
+          "-WindowStyle",
+          "Hidden",
+          "-Command",
+          `"[System.Reflection.Assembly]::LoadWithPartialName('System.Media') | Out-Null; $p = New-Object System.Media.SoundPlayer('${psPath}'); $p.Play();"`,
+        ];
+        const ps = spawn("powershell.exe", psArgs, {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        ps.unref();
+
+        console.log(`🔊 Windows fallback → PowerShell SoundPlayer: ${soundFile}`);
+        return res.json({ ok: true, player: "powershell SoundPlayer (fallback)", file: soundFile });
+      } catch (e2) {
+        console.error("Play fallback failed:", e2?.message || e2);
+        return res.status(500).json({ ok: false, error: "Failed to play sound on Windows fallback." });
+      }
+    }
+
+    console.error("Play failed:", err?.message || err);
+    return res.status(500).json({ ok: false, error: "Failed to play sound." });
+  }
 });
 
 // 🩺 Health Check

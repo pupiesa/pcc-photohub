@@ -84,6 +84,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const handleCapture = async () => {
     try {
       if (!CAMERA_BASE) throw new Error("CAMERA_BASE not set");
+      fetch(`${PRINT_BASE}/play/che.wav`);
       const res = await fetch(`${CAMERA_BASE}/capture`, { method: "POST", headers: { "Content-Type": "application/json" } });
       if (!res.ok) throw new Error((await res.text()) || `Capture failed: ${res.status}`);
       const data = await res.json();

@@ -148,7 +148,7 @@ export default function BoothPage() {
 
   const backToLoginOnFail = (msg = "ชำระเงินไม่สำเร็จ กรุณาลองใหม่") => {
     showNotice(msg, "error", false, 5000);
-    setCurrentView("login");
+    setCurrentView("onBack"); //login
     resetPayUi();
   };
 
@@ -308,12 +308,14 @@ export default function BoothPage() {
         if (d.ok) {
           setPayStatus(d.status);
           if (d.status === "succeeded") {
+            fetch(`${PRINT_BASE}/play/cash.wav`);
             showNotice("ชำระเงินสำเร็จ", "success", false, 3000);
             if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
             setCurrentView("photobooth");
             resetPayUi();
             stop = true;
           } else if (["canceled", "requires_payment_method"].includes(d.status)) {
+            fetch(`${PRINT_BASE}/play/i.wav`);
             if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
             backToLoginOnFail("ชำระเงินไม่สำเร็จ กรุณาลองใหม่");
             stop = true;
