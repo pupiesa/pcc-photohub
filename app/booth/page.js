@@ -161,6 +161,7 @@ export default function BoothPage() {
         localStorage.setItem("pcc_user_phone", String(phone));
         localStorage.setItem("pcc_user_pin", String(pin));
       }
+      fetch(`${PRINT_BASE}/play/promo.wav`);
       setCurrentView("Coupon");
       resetPayUi();
       showNotice("Signed in", "success", false, 3000);
@@ -284,6 +285,7 @@ export default function BoothPage() {
             userNumber: user?.phone,
             orderAmount: BASE_ORDER_AMOUNT,
           }); // ใช้ SDK เดิมในการตรวจคูปอง :contentReference[oaicite:2]{index=2}
+           fetch(`${PRINT_BASE}/play/couponuse.wav`);
           await startPayment(filtered);
         } catch {
           showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);

@@ -75,7 +75,7 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
         fetch(`${PRINT_BASE}/play/passagain.wav`);
       } else {
         onLogin?.({ phone: phoneNumber, pin, mode: "login" });
-        fetch(`${PRINT_BASE}/play/promo.wav`);
+        //fetch(`${PRINT_BASE}/play/promo.wav`);
       }
       return;
     }
@@ -88,7 +88,7 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
         return;
       }
       onLogin?.({ phone: phoneNumber, pin, mode: "signup" });
-      fetch(`${PRINT_BASE}/play/promo.wav`);
+      //fetch(`${PRINT_BASE}/play/promo.wav`);
     }
     
   };
