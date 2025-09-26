@@ -325,7 +325,7 @@ export default function CustomerDashboard() {
   const refresh = () => phone && load(phone);
 
   /* ---------- Auto logout + visible countdown ---------- */
-  const INACTIVITY_MS = 120000; // 2 minutes
+  const INACTIVITY_MS = 300000; // 5 minutes
   const logout = useCallback(() => {
     fetch(`${PRINT_BASE}/play/thankyou.wav`);
     localStorage.removeItem("pcc_user_phone");
