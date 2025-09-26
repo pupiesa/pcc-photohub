@@ -3,6 +3,8 @@
 
 import { useEffect, useRef } from "react";
 import Image from "next/image";
+import { Button } from "@/components/ui/button"; // Assuming shadcn/ui Button component
+import { LogOut } from "lucide-react"; // Assuming lucide-react for icons
 
 export default function CouponPaymentPanel({
   showPay = false,
@@ -10,6 +12,7 @@ export default function CouponPaymentPanel({
   onCouponChange = () => {},
   onRedeem = () => {},
   onSkipNoCoupon = () => {},
+  onLogout = () => {}, // New prop for logout handler
   loading = false,
   codeLength = 8,
   qrUrl = "",
@@ -21,7 +24,7 @@ export default function CouponPaymentPanel({
 }) {
   const inputRef = useRef(null);
 
-  // โฟกัสเฉพาะตอนสลับเข้าหน้า Coupon Mode
+  // Focus input when entering Coupon Mode
   useEffect(() => {
     if (!showPay && inputRef.current) {
       requestAnimationFrame(() => {
@@ -98,6 +101,18 @@ export default function CouponPaymentPanel({
   // ===== Coupon Mode =====
   return (
     <div className="flex flex-col items-center justify-between w-full">
+      {/* Logout Button and Panel Container */}
+      <div className="w-full max-w-[360px] flex justify-end mb-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onLogout}
+          className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 bg-red-600 shadow-lg shadow-cyan-500/50 hover:bg-white/20 dark:hover:bg-gray-800/20 backdrop-blur-sm transition-all duration-200 rounded-full px-4 py-2 shadow-sm border border-gray-200 dark:border-gray-700"
+          title="ออกจากระบบ"
+        >
+          <LogOut className="w-4 h-4" />
+        </Button>
+      </div>
       {/* Panel coupon */}
       <div className="w-full max-w-[360px] rounded-2xl border bg-blue/10 dark:bg-white/5 backdrop-blur p-3 shadow-sm ring ring-pink-500 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-900 shadow-2xl">
         <label htmlFor="coupon-input" className="block text-xs mb-1.5 opacity-80">

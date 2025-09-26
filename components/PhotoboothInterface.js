@@ -145,13 +145,15 @@ export default function PhotoboothInterface({ user, onLogout }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ paths: nextPaths }),
           });
+            if (apiRes.ok) {
+              fetch(`${PRINT_BASE}/play/print.wav`);
+            }
           if (!apiRes.ok) {
             console.error("Print API call failed:", await apiRes.text());
           }
         } catch (err) {
           console.error("Error call Print API:", err);
         }
-        fetch(`${PRINT_BASE}/play/321.wav`);
         return;
       }
 

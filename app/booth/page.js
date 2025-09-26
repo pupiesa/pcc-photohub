@@ -337,6 +337,7 @@ export default function BoothPage() {
         onCouponChange={(v) => onCouponChange(v)}
         onRedeem={() => startPayment(couponInput)}
         onSkipNoCoupon={() => startPayment("")}
+        onLogout={handleLogout}
         loading={loadingPay}
         codeLength={AUTO_REDEEM_LEN}
 
