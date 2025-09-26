@@ -63,7 +63,7 @@ export default function CouponPaymentPanel({
             <p className="text-xs font-medium mt-3 mb-3 text-center">
               หากชำระเงินเสร็จสิ้น{" "}
               <span className="text-red-600 font-semibold">
-                ร้อยระบบจะดำเนินการโดยอัตโนมัติ
+                ระบบจะดำเนินการโดยอัตโนมัติ
               </span>
             </p>
 

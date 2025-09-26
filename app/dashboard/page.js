@@ -25,20 +25,28 @@ import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradien
 import { Skeleton } from "@/components/ui/skeleton";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { Eye, EyeOff } from "lucide-react";
-
+import { useInView } from "react-intersection-observer";
 
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
-const NC_BASE = process.env.NEXT_PUBLIC_NC_BASE || "/ncapi";
-const OTP_TOTAL_SECS = 80;
-const INACTIVITY_MS = 300_000; // 5 นาที
-
 const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
 const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
 const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
 
-const buildProxyPreview = (relPath) =>
-  `${(NC_BASE || "").replace(/\/$/, "")}/api/nextcloud/preview?path=${encodeURIComponent(relPath)}`;
+const OTP_TOTAL_SECS = (parseInt(process.env.OTP_TTL_MIN) || 1) * 60;
+
+const buildProxyPreview = (relPath, size = 300) =>
+  `/ncapi/api/nextcloud/preview?path=${encodeURIComponent(relPath)}&width=${size}&height=${size}&quality=80`;
+
+const buildProxyPreviewSrcSet = (relPath) => ({
+  src: buildProxyPreview(relPath, 300),
+  srcSet: `
+    ${buildProxyPreview(relPath, 150)} 150w,
+    ${buildProxyPreview(relPath, 300)} 300w,
+    ${buildProxyPreview(relPath, 600)} 600w
+  `,
+  lqip: `${buildProxyPreview(relPath, 20)}&lqip=true`, // URL สำหรับ LQIP
+});
 
 function deriveRelPath(it) {
   if (it?.path) return String(it.path).replace(/^\/+/, "");
@@ -64,25 +72,33 @@ function deriveRelPath(it) {
 }
 
 function ProxyPreview({ item, onLoadingComplete, className }) {
+  const { ref, inView } = useInView({ triggerOnce: true });
   const rel = deriveRelPath(item);
   if (!rel) return <div className="w-full aspect-square bg-gray-200/20 rounded" />;
+  const { src, srcSet, lqip } = buildProxyPreviewSrcSet(rel);
   return (
-    <div className={`relative w-full aspect-square ${className || ""}`}>
-      <Image
-        src={buildProxyPreview(rel)}
-        alt={item?.name || "preview"}
-        fill
-        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 20vw"
-        className="object-cover select-none"
-        unoptimized
-        loading="lazy"
-        onLoadingComplete={onLoadingComplete}
-      />
+    <div ref={ref} className={`relative w-full aspect-square ${className || ""}`}>
+      {inView ? (
+        <Image
+          src={src}
+          srcSet={srcSet}
+          alt={item?.name || "preview"}
+          fill
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 20vw"
+          className="object-cover select-none"
+          placeholder="blur"
+          blurDataURL={lqip}
+          loading="lazy"
+          onLoadingComplete={onLoadingComplete}
+        />
+      ) : (
+        <div className="w-full aspect-square bg-gray-200/20 rounded" />
+      )}
     </div>
   );
 }
 
-/* ---------- Progressive Gallery  ---------- */
+/* ---------- Progressive Gallery ---------- */
 function PhotoCard({ item }) {
   const [loaded, setLoaded] = useState(false);
   return (
@@ -96,7 +112,7 @@ function PhotoCard({ item }) {
         }`}
       >
         <div className="w-full h-full">
-          <div className="w-full h-full bg-gray-300/10 dark:bg-gray-700/30" />
+          <div className="w-full h-full bg-gray-200/10 dark:bg-gray-700/30" />
         </div>
       </div>
 
@@ -109,7 +125,7 @@ function PhotoCard({ item }) {
   );
 }
 
-/* ---------- Grid + Infinite Scroll  ---------- */
+/* ---------- Grid + Infinite Scroll ---------- */
 const PAGE_SIZE = 24;
 
 function useInfiniteInScrollArea({ rootRef, hasMore, loadMore, margin = "1000px" }) {
@@ -140,7 +156,7 @@ function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
     rootRef: scrollRef,
     hasMore,
     loadMore,
-    margin: "50px",
+    margin: "1000px",
   });
 
   return (
@@ -161,7 +177,7 @@ function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
 /* ---------- Inline Keyboards ---------- */
 function InlineOtpKeypad({ visible, setValue, onDone }) {
   if (!visible) return null;
-  const keys = ["1","2","3","4","5","6","7","8","9","0"];
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
   const press = (k) => {
     if (k === "back") setValue((v) => v.slice(0, -1));
     else if (k === "clear") setValue("");
@@ -191,25 +207,25 @@ function InlineOtpKeypad({ visible, setValue, onDone }) {
 function InlineEmailKeyboard({ visible, setValue, onDone }) {
   if (!visible) return null;
   const rows = [
-    ["1","2","3","4","5","6","7","8","9","0"],
-    ["q","w","e","r","t","y","u","i","o","p"],
-    ["a","s","d","f","g","h","j","k","l","@"],
-    ["z","x","c","v","b","n","m",".","_","-"],
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+    ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+    ["a", "s", "d", "f", "g", "h", "j", "k", "l", "@"],
+    ["z", "x", "c", "v", "b", "n", "m", ".", "_", "-"],
   ];
   const press = (k) => {
     if (k === "back") setValue((v) => v.slice(0, -1));
     else if (k === "clear") setValue("");
     else if (k === "paste") {
-      navigator.clipboard.readText().then((t) => setValue(String(t))).catch(()=>{});
+      navigator.clipboard.readText().then((t) => setValue(String(t))).catch(() => []);
     } else setValue((v) => (v + k).slice(0, 254));
   };
   return (
     <div className="mt-3 rounded-xl border p-3 bg-muted/30">
       <div className="space-y-2">
-         <div className="flex gap-1  rounded-xl justify-start">
+        <div className="flex gap-1 rounded-xl justify-start">
           <Button variant="secondary" onClick={() => press("@gmail.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@gmail.com</Button>
           <Button variant="secondary" onClick={() => press("@kmitl.ac.th")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@kmitl.ac.th</Button>
-          <Button variant="secondary" onClick={() => press("@@outlook.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@outlook.com</Button>
+          <Button variant="secondary" onClick={() => press("@outlook.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@outlook.com</Button>
         </div>
         {rows.map((row, idx) => (
           <div key={idx} className="flex gap-1 justify-center">
@@ -259,7 +275,7 @@ export default function CustomerDashboard() {
   const [otpSecsLeft, setOtpSecsLeft] = useState(OTP_TOTAL_SECS);
   const [canResend, setCanResend] = useState(false);
   const [otpTimerKey, setOtpTimerKey] = useState(0);
-  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25; //progress bar 25 sec blink red color
+  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25; // progress bar 25 sec blink red color
 
   // soft keyboards
   const [showEmailKb, setShowEmailKb] = useState(false);
@@ -309,6 +325,7 @@ export default function CustomerDashboard() {
   const refresh = () => phone && load(phone);
 
   /* ---------- Auto logout + visible countdown ---------- */
+  const INACTIVITY_MS = 120000; // 2 minutes
   const logout = useCallback(() => {
     fetch(`${PRINT_BASE}/play/thankyou.wav`);
     localStorage.removeItem("pcc_user_phone");
@@ -327,7 +344,7 @@ export default function CustomerDashboard() {
   useEffect(() => {
     if (!phone) return;
 
-    const events = ["pointerdown","keydown","mousemove","wheel","touchstart","scroll"];
+    const events = ["pointerdown", "keydown", "mousemove", "wheel", "touchstart", "scroll"];
     const handler = () => resetIdle();
 
     events.forEach((ev) => window.addEventListener(ev, handler, { passive: true }));
@@ -429,75 +446,42 @@ export default function CustomerDashboard() {
         setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
         return;
       }
-      setFlowError(e?.message || "ส่งรหัสไม่สำเร็จ กรุณาลองใหม่");
-      toast.error(e?.message || "ส่งรหัสไม่สำเร็จ");
+      setFlowError(e?.message || "ส่งรหัส OTP ล้มเหลว กรุณาลองใหม่");
+      toast.error(e?.message || "ส่งรหัส OTP ล้มเหลว");
     } finally { setSending(false); }
   };
 
-  const createNextcloudLink = async (passwordOverride) => {
-    if (!phone) return null;
-    const linkPassword = (passwordOverride || summary.displayName?.trim() || String(phone)).replace(/\s+/g, "");
-    const res = await client.shareOnly({
-      folderName: phone, permissions: 1, publicUpload: false,
-      note: `Share for ${phone}`, linkPassword, expiration: null, forceNew: true,
-    });
-    const link = res?.share?.url || res?.url || res?.data?.url || res?.publicUrl || res?.link || null;
-    if (!link) throw new Error("สร้างลิงก์สำเร็จ แต่ไม่พบ URL สำหรับใช้งาน");
-    await client.setNextcloudLink(phone, link);
-    return link;
-  };
-
   const handleResend = async () => {
-    if (!phone || !canResend) return;
-    setFlowError(null); setSending(true);
+    if (!canResend || sending || !phone) return;
+    setSending(true);
     try {
       await client.requestEmailOTP({ number: phone, email: email.trim(), heading: 'Verify your email' });
-      setOtp(""); setOtpTimerKey((k) => k + 1);
-      setTimeout(() => otpFirstSlotRef.current?.focus({ preventScroll: true }), 30);
-      toast.success("ส่งรหัสใหม่แล้ว");
-      setShowOtpKb(true);
+      setOtp("");
+      setOtpSecsLeft(OTP_TOTAL_SECS);
+      setOtpTimerKey((k) => k + 1);
+      setCanResend(false);
+      toast.success("ส่งรหัส OTP ใหม่แล้ว ตรวจอีเมลของคุณ");
     } catch (e) {
-      setFlowError(e?.message || "ส่งรหัสใหม่ไม่สำเร็จ");
-      toast.error(e?.message || "ส่งรหัสใหม่ไม่สำเร็จ");
+      console.error(e);
+      setFlowError(e?.message || "ส่งรหัส OTP ล้มเหลว กรุณาลองใหม่");
+      toast.error(e?.message || "ส่งรหัส OTP ล้มเหลว");
     } finally { setSending(false); }
   };
 
   const handleVerifyOtp = async () => {
-    if (!phone) return;
+    if (!/^\d{6}$/.test(otp) || !phone || sending) return;
     setFlowError(null); setSending(true);
     try {
-      await client.confirmEmailOTP({ number: phone, email: email.trim(), otp: otp.trim() });
+      await client.confirmEmailOTP({ number: phone, email: email.trim(), otp });
       await client.setGmail(phone, email.trim());
       await client.setConsentedTrue(phone);
-
-      const newPassword = (summary.displayName?.trim() || String(phone)).replace(/\s+/g, "");
-
-      if (summary.link) {
-        await client.changeSharePasswordForUser({
-          number: phone,
-          newPassword,
-          permissions: 1,
-          publicUpload: false,
-          note: `Protect share for ${phone}`,
-        });
-      } else {
-        await createNextcloudLink(newPassword);
-      }
-
-      await load(phone);
-      setOpenEmailFlow(false);
       toast.success("ยืนยันอีเมลสำเร็จ");
+      setOpenEmailFlow(false);
+      setStep("email");
+      setShowOtpKb(false);
+      refresh();
     } catch (e) {
       console.error(e);
-      if (isDuplicateEmailError(e)) {
-        toast.error("อีเมลนี้ถูกใช้แล้ว โปรดใช้อีเมลอื่น", { duration: 5000 });
-        setTimeout(() => {
-          setStep("email"); setOtp("");
-          setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
-          setShowEmailKb(true); setShowOtpKb(false);
-        }, 500);
-        return;
-      }
       setFlowError(e?.message || "ยืนยันรหัสไม่สำเร็จ กรุณาลองใหม่");
       toast.error(e?.message || "ยืนยันรหัสไม่สำเร็จ");
     } finally { setSending(false); }
@@ -564,11 +548,10 @@ export default function CustomerDashboard() {
             {/* PIN */}
             <div className="text-sm">
               <div className="text-gray-500 dark:text-gray-400">Pin</div>
-             <div className="font-medium flex items-center gap-2">
+              <div className="font-medium flex items-center gap-2">
                 <span className="font-mono tracking-wider select-none">
                   {pin ? (showPin ? pin : "••••••") : "-"}
                 </span>
-
                 {pin && (
                   <Button
                     size="icon"
@@ -577,7 +560,7 @@ export default function CustomerDashboard() {
                     aria-label={showPin ? "Hide PIN" : "Show PIN"}
                     className="h-8 w-8 shadow-lg shadow-cyan-500 hover:shadow-purple-500 hover:opacity-80"
                   >
-                    {showPin ? <Eye className="h-4 w-4 text-green-700 " /> : <EyeOff className="h-4 w-4 text-red-700" />}
+                    {showPin ? <Eye className="h-4 w-4 text-green-700" /> : <EyeOff className="h-4 w-4 text-red-700" />}
                   </Button>
                 )}
               </div>
@@ -601,12 +584,12 @@ export default function CustomerDashboard() {
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-3 text-center">
-                  <div className="font-medium">ยันยันอีเมลเพื่อใช้ยืนยันตัวตนเเละกู้คืน PIN</div>
+                  <div className="font-medium">ยืนยันอีเมลเพื่อใช้ยืนยันตัวตนและกู้คืน PIN</div>
                   <Button onClick={() => {
                     setFlowError(null); setEmail(""); setConsent(false); setOtp("");
                     setStep("email"); setOpenEmailFlow(true); emailKbSuppressRef.current = false;
                   }}>ใส่/ยืนยันอีเมล</Button>
-                   <GradientText
+                  <GradientText
                     className="text-xs text-gray-500 mt-1"
                     text="*สามารถดูรูปออนไลน์ได้หลังจากยืนยันอีเมลสำเร็จ*"
                     neon
@@ -711,13 +694,13 @@ export default function CustomerDashboard() {
                 <div className="grid gap-2">
                   <ScrollArea className="h-44 rounded-md border p-3 text-sm leading-6">
                     <ul className="list-disc pl-5 space-y-2">
-                        <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
-                        <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
-                        <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัยของคุณ</li>
-                        <li><strong>ข้อควรระวัง:</strong> การเปิดเผยรหัสหรือลิงก์แก่บุคคลอื่น อาจทำให้ข้อมูลรั่วไหล pccphoto-hub ไม่รับผิดชอบต่อความเสียหายที่เกิดจากการเผยแพร่เอง</li>
-                        <li>คุณยอมรับและอนุญาตให้ <strong>pccphoto-hub</strong> เก็บและใช้ข้อมูลที่เกี่ยวข้อง เพื่อการให้บริการและตามที่กฎหมายกำหนด</li>
-                        <li>คุณมีสิทธิ์ <strong>ขอแก้ไข หรือลบข้อมูล</strong> ตามสิทธิที่กฎหมายคุ้มครอง</li>
-                        <li>การดำเนินการต่อ ถือว่าคุณได้ <strong>ยอมรับเงื่อนไขและนโยบายความเป็นส่วนตัว</strong> แล้ว</li>
+                      <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
+                      <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
+                      <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัยของคุณ</li>
+                      <li><strong>ข้อควรระวัง:</strong> การเปิดเผยรหัสหรือลิงก์แก่บุคคลอื่น อาจทำให้ข้อมูลรั่วไหล pccphoto-hub ไม่รับผิดชอบต่อความเสียหายที่เกิดจากการเผยแพร่เอง</li>
+                      <li>คุณยอมรับและอนุญาตให้ <strong>pccphoto-hub</strong> เก็บและใช้ข้อมูลที่เกี่ยวข้อง เพื่อการให้บริการและตามที่กฎหมายกำหนด</li>
+                      <li>คุณมีสิทธิ์ <strong>ขอแก้ไข หรือลบข้อมูล</strong> ตามสิทธิที่กฎหมายคุ้มครอง</li>
+                      <li>การดำเนินการต่อ ถือว่าคุณได้ <strong>ยอมรับเงื่อนไขและนโยบายความเป็นส่วนตัว</strong> แล้ว</li>
                     </ul>
                   </ScrollArea>
 
@@ -790,7 +773,7 @@ export default function CustomerDashboard() {
                     onChange={(v) => setOtp(String(v).replace(/\D/g, "").slice(0, 6))}
                   >
                     <InputOTPGroup>
-                      {[0,1,2,3,4,5].map((i) => (
+                      {[0, 1, 2, 3, 4, 5].map((i) => (
                         <InputOTPSlot
                           key={i}
                           index={i}

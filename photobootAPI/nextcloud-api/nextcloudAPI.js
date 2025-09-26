@@ -1,3 +1,4 @@
+// nextcloudAPI.js
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -8,6 +9,7 @@ import axios from 'axios';
 import https from 'https';
 import multer from 'multer';
 import mime from 'mime-types';
+import sharp from 'sharp';
 
 const app = express();
 const port = process.env.NEXTCLOUD_PORT;
@@ -455,6 +457,12 @@ app.get("/api/nextcloud/preview", async (req, res) => {
     const rel = normRelPath(req.query.path || "");
     if (!rel) return res.status(400).json({ ok: false, message: "path required" });
 
+    // ดึงพารามิเตอร์ขนาดภาพ
+    const width = parseInt(req.query.width) || 300; // ค่า default 300px
+    const height = parseInt(req.query.height) || 300;
+    const quality = parseInt(req.query.quality) || 80; // คุณภาพ WebP
+    const isLQIP = req.query.lqip === "true"; // สำหรับสร้าง LQIP
+
     const tryWebdav = async () => {
       try {
         const data = await webdavClient.getFileContents(rel, { format: "binary" });
@@ -481,10 +489,23 @@ app.get("/api/nextcloud/preview", async (req, res) => {
       buf = Buffer.from(r.data);
     }
 
-    const contentType = mime.lookup(rel) || "application/octet-stream";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
-    res.end(buf);
+    // ประมวลผลภาพด้วย sharp
+    let image = sharp(buf);
+    if (isLQIP) {
+      // สร้าง LQIP (ภาพขนาดเล็กมากสำหรับ placeholder)
+      image = image.resize(20, 20, { fit: "cover" }).webp({ quality: 20 });
+    } else {
+      // ปรับขนาดภาพตาม width และ height
+      image = image.resize(width, height, { fit: "cover" }).webp({ quality });
+    }
+
+    // ดึง buffer ของภาพที่ประมวลผลแล้ว
+    const outputBuffer = await image.toBuffer();
+
+    // ตั้งค่า Content-Type และ Cache-Control
+    res.setHeader("Content-Type", "image/webp");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable"); // แคช 1 ปี
+    res.end(outputBuffer);
   } catch (e) {
     const status = e?.response?.status || 404;
     console.error("preview failed:", { status, msg: e?.message, path: req?.query?.path });
@@ -515,7 +536,7 @@ app.get("/api/nextcloud/list", async (req, res) => {
   }
 });
 
-app.post('/api/nextcloud/upload-bytes', uploadImagesOnly.single('file'), async (req, res) => {
+app.post("/api/nextcloud/upload-bytes", uploadImagesOnly.single('file'), async (req, res) => {
   try {
     const folderName = (req.body?.folderName || '').trim();
     const targetName = (req.body?.targetName || '').trim();
