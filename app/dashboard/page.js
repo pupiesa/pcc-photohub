@@ -31,7 +31,11 @@ import { Eye, EyeOff } from "lucide-react";
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const NC_BASE = process.env.NEXT_PUBLIC_NC_BASE || "/ncapi";
 const OTP_TOTAL_SECS = 80;
-const INACTIVITY_MS = 120_000; // 2 นาที
+const INACTIVITY_MS = 300_000; // 5 นาที
+
+const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
+const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
+const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
 
 const buildProxyPreview = (relPath) =>
   `${(NC_BASE || "").replace(/\/$/, "")}/api/nextcloud/preview?path=${encodeURIComponent(relPath)}`;
@@ -106,7 +110,7 @@ function PhotoCard({ item }) {
 }
 
 /* ---------- Grid + Infinite Scroll  ---------- */
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 24;
 
 function useInfiniteInScrollArea({ rootRef, hasMore, loadMore, margin = "1000px" }) {
   const sentinelRef = useRef(null);
@@ -136,7 +140,7 @@ function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
     rootRef: scrollRef,
     hasMore,
     loadMore,
-    margin: "1200px",
+    margin: "50px",
   });
 
   return (
@@ -306,6 +310,7 @@ export default function CustomerDashboard() {
 
   /* ---------- Auto logout + visible countdown ---------- */
   const logout = useCallback(() => {
+    fetch(`${PRINT_BASE}/play/thankyou.wav`);
     localStorage.removeItem("pcc_user_phone");
     localStorage.removeItem("pcc_user_pin");
     router.push("/booth");

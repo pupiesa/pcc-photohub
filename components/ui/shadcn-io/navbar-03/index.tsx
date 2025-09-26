@@ -65,18 +65,12 @@ export interface Navbar03Props extends React.HTMLAttributes<HTMLElement> {
   logo?: React.ReactNode
   logoHref?: string
   navigationLinks?: Navbar03NavItem[]
-  signInText?: string
-  signInHref?: string
-  ctaText?: string
-  ctaHref?: string
-  onSignInClick?: () => void
-  onCtaClick?: () => void
 }
 
 /* --------- Real routes (no "#") --------- */
 const defaultNavigationLinks: Navbar03NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/pricing", label: "Pricing" },
+  { href: "/gallery", label: "Gallery" },
   { href: "/about", label: "About" },
 ]
 
@@ -96,12 +90,6 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
       logo = <Logo />,
       logoHref = "/",
       navigationLinks = defaultNavigationLinks,
-      signInText = "Sign In",
-      signInHref = "/signin",
-      ctaText = "Get Started",
-      ctaHref = "/booth",
-      onSignInClick,
-      onCtaClick,
       ...props
     },
     ref
@@ -141,12 +129,12 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
       <header
         ref={combinedRef}
         className={cn(
-          "sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 md:px-6 [&_*]:no-underline",
+          "sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
           className
         )}
         {...props}
       >
-        <div className="container mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-4">
+        <div className="container mx-auto flex h-14 items-center justify-between gap-4 px-4">
           {/* Left */}
           <div className="flex items-center gap-2">
             {/* Mobile menu */}
@@ -154,7 +142,7 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
               <Popover open={mobileOpen} onOpenChange={setMobileOpen}>
                 <PopoverTrigger asChild>
                   <Button
-                    className="group h-9 w-9 hover:bg-accent hover:text-accent-foreground"
+                    className="group h-8 w-8 hover:bg-transparent hover:text-primary"
                     variant="ghost"
                     size="icon"
                     aria-label="Open menu"
@@ -162,7 +150,7 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
                     <HamburgerIcon />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="start" className="w-64 p-1">
+                <PopoverContent align="start" className="w-56 p-1 bg-background/95 backdrop-blur">
                   <nav className="flex flex-col">
                     {navigationLinks
                       .filter((l) => !l.authOnly)
@@ -173,7 +161,7 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
                             key={link.href}
                             asChild
                             variant={active ? "secondary" : "ghost"}
-                            className={cn("justify-start", active && "font-semibold")}
+                            className={cn("justify-start text-sm", active && "font-medium")}
                             onClick={() => setMobileOpen(false)}
                           >
                             <Link href={link.href || "#"}>{link.label}</Link>
@@ -186,17 +174,17 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
             )}
 
             {/* Logo */}
-            <Button asChild variant="link" className="px-0 text-primary hover:text-primary/90">
+            <Button asChild variant="link" className="px-0 text-primary hover:text-primary/80">
               <Link href={logoHref} className="flex items-center space-x-2">
-                <span className="text-2xl">{logo}</span>
-                <span className="hidden font-bold text-xl sm:inline-block">shadcn.io</span>
+                <span className="text-xl">{logo}</span>
+                <span className="font-semibold text-lg sm:inline-block">Pcc-photohub</span>
               </Link>
             </Button>
 
             {/* Desktop nav */}
             {!isMobile && (
               <NavigationMenu className="flex">
-                <NavigationMenuList className="gap-1">
+                <NavigationMenuList className="gap-2">
                   {navigationLinks
                     .filter((l) => !l.authOnly)
                     .map((link) => {
@@ -206,9 +194,8 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
                           <NavigationMenuLink
                             asChild
                             className={cn(
-                              "group inline-flex h-10 w-max items-center justify-center rounded-md bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50 data-[active]:bg-accent/50 data-[state=open]:bg-accent/50 relative",
-                              "before:absolute before:bottom-0 before:left-0 before:right-0 before:h-0.5 before:bg-primary before:scale-x-0 before:transition-transform before:duration-300 group-hover:before:scale-x-100",
-                              active && "before:scale-x-100 text-primary font-semibold"
+                              "inline-flex h-8 items-center rounded-md px-3 py-1 text-sm font-medium transition-colors hover:bg-accent/50 hover:text-primary focus:bg-accent/50 focus:text-primary focus:outline-none",
+                              active && "text-primary font-semibold"
                             )}
                             data-active={active}
                           >
@@ -220,27 +207,6 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
                 </NavigationMenuList>
               </NavigationMenu>
             )}
-          </div>
-
-          {/* Right */}
-          <div className="flex items-center gap-3">
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              className="text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-              onClick={onSignInClick}
-            >
-              <Link href={signInHref}>{signInText}</Link>
-            </Button>
-            <Button
-              asChild
-              size="sm"
-              className="text-sm font-medium px-4 h-9 rounded-md shadow-sm"
-              onClick={onCtaClick}
-            >
-              <Link href={ctaHref}>{ctaText}</Link>
-            </Button>
           </div>
         </div>
       </header>
