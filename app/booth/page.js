@@ -488,8 +488,9 @@ export default function BoothPage() {
     return () => { stop = true; };
   }, [piId]);
 
-  return (
-    <WarpBackground className="h-screen flex flex-col" {...WARP_CONFIG}>
+ return (
+  <WarpBackground className="h-screen flex flex-col" {...WARP_CONFIG}>
+    {currentView !== "photobooth" && (
       <div className="text-center pt-8">
         <GradientText
           className="text-4xl font-bold text-center"
@@ -498,110 +499,125 @@ export default function BoothPage() {
           gradient="linear-gradient(90deg, #00ff00 0%, #00ffff 25%, #ff00ff 50%, #00ffff 75%, #00ff00 100%)"
         />
       </div>
+    )}
 
-      {/* Toast */}
-      {notice && (
-        <div className={`fixed top-5 right-5 z-50 transition-opacity duration-700 ${noticeVisible ? "opacity-100" : "opacity-0"}`}>
-          <div className={`min-w-[260px] max-w-[360px] rounded-xl shadow-xl border backdrop-blur px-4 py-3
-            ${cardColor} text-sm font-medium tracking-tight text-gray-900 dark:text-gray-100`}>
-            <div className={`h-1 w-full rounded-full bg-gradient-to-r ${colorBar} mb-2`}
-              style={{ width: `${progress}%`, transition: `width ${PROG_TICK}ms linear` }} />
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                {notice.variant === "success" && (
-                  <span className="text-emerald-600 dark:text-emerald-400"><SuccessTick /></span>
-                )}
-                <span>{notice.text}</span>
-              </div>
-              {notice.variant === "warn" && (
-                <button
-                  onClick={retryNow}
-                  className="ml-2 px-2 py-1 text-xs rounded-md border border-amber-400/60 bg-amber-50/60 dark:bg-amber-900/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition"
-                >
-                  Retry
-                </button>
+    {/* Toast */}
+    {notice && (
+      <div className={`fixed top-5 right-5 z-50 transition-opacity duration-700 ${noticeVisible ? "opacity-100" : "opacity-0"}`}>
+        <div
+          className={`min-w-[260px] max-w-[360px] rounded-xl shadow-xl border backdrop-blur px-4 py-3
+            ${cardColor} text-sm font-medium tracking-tight text-gray-900 dark:text-gray-100`}
+        >
+          <div
+            className={`h-1 w-full rounded-full bg-gradient-to-r ${colorBar} mb-2`}
+            style={{ width: `${progress}%`, transition: `width ${PROG_TICK}ms linear` }}
+          />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {notice.variant === "success" && (
+                <span className="text-emerald-600 dark:text-emerald-400"><SuccessTick /></span>
               )}
+              <span>{notice.text}</span>
             </div>
-            {notice.sticky && downList.length > 0 && <div className="mt-1 text-xs opacity-80">{downList.join(" • ")}</div>}
+            {notice.variant === "warn" && (
+              <button
+                onClick={retryNow}
+                className="ml-2 px-2 py-1 text-xs rounded-md border border-amber-400/60 bg-amber-50/60 dark:bg-amber-900/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition"
+              >
+                Retry
+              </button>
+            )}
           </div>
-
-          <style jsx global>{`
-            .ckmk-circle, .ckmk-check {
-              stroke: currentColor;
-              stroke-linecap: round;
-              stroke-linejoin: round;
-            }
-            .ckmk-circle {
-              stroke-dasharray: 150;
-              stroke-dashoffset: 150;
-              animation: ckmk-draw 0.55s ease-out forwards; opacity: .9;
-            }
-            .ckmk-check {
-              stroke-dasharray: 40;
-              stroke-dashoffset: 40;
-              animation: ckmk-draw 0.35s 0.35s ease-out forwards;
-            }
-            @keyframes ckmk-draw { to { stroke-dashoffset: 0; } }
-          `}</style>
+          {notice.sticky && downList.length > 0 && (
+            <div className="mt-1 text-xs opacity-80">{downList.join(" • ")}</div>
+          )}
         </div>
-      )}
 
-      {/* Idle countdown banner */}
-      {typeof secondsLeft === "number" && secondsLeft > 0 && secondsLeft <= 20 && (
-        <div className="fixed bottom-4 inset-x-0 flex justify-center pointer-events-none">
-          <div className="pointer-events-auto px-4 py-2 rounded-full bg-black/70 text-red-500 text-sm shadow-lg backdrop-blur">
-            ไม่มีการใช้งาน — จะออกจากระบบอัตโนมัติใน <span className="font-bold">{secondsLeft}</span>
-          </div>
+        <style jsx global>{`
+          .ckmk-circle, .ckmk-check {
+            stroke: currentColor;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+          }
+          .ckmk-circle {
+            stroke-dasharray: 150;
+            stroke-dashoffset: 150;
+            animation: ckmk-draw 0.55s ease-out forwards; opacity: .9;
+          }
+          .ckmk-check {
+            stroke-dasharray: 40;
+            stroke-dashoffset: 40;
+            animation: ckmk-draw 0.35s 0.35s ease-out forwards;
+          }
+          @keyframes ckmk-draw { to { stroke-dashoffset: 0; } }
+        `}</style>
+      </div>
+    )}
+
+    {/* Idle countdown banner */}
+    {typeof secondsLeft === "number" && secondsLeft > 0 && secondsLeft <= 20 && (
+      <div className="fixed bottom-4 inset-x-0 flex justify-center pointer-events-none">
+        <div className="pointer-events-auto px-4 py-2 rounded-full bg-black/70 text-red-500 text-sm shadow-lg backdrop-blur">
+          ไม่มีการใช้งาน — จะออกจากระบบอัตโนมัติใน <span className="font-bold">{secondsLeft}</span>
         </div>
-      )}
+      </div>
+    )}
 
-      {/* การ์ดโปรโมชัน */}
-      {promoCard.show && (
-        <PromotionSuccessCard
-          amount={promoCard.amount}
-          isFree={promoCard.isFree}
-          seconds={2}
-          playSoundUrl={`${PRINT_BASE}/play/couponuse.wav`}
-          onDone={() => {
-            setPromoCard((p) => ({ ...p, show: false }));
-            if (promoCard.isFree) {
-              showNotice("🔖 Free Session", "success", false, 2600);
-              setCurrentView("photobooth");
-              resetPayUi();
-            } else {
-              if (piId && payStatus === "requires_action") {
-                setShowPay(true);
-                if (!countdownRef.current) {
-                  setTimeLeft(EXPIRE_SECONDS);
-                  countdownRef.current = setInterval(() => {
-                    setTimeLeft((t) => {
-                      if (t <= 1) {
-                        clearInterval(countdownRef.current);
-                        countdownRef.current = null;
-                        expireSessionNow();
-                        return 0;
-                      }
-                      return t - 1;
-                    });
-                  }, 1000);
-                }
+    {/* การ์ดโปรโมชัน */}
+    {promoCard.show && (
+      <PromotionSuccessCard
+        amount={promoCard.amount}
+        isFree={promoCard.isFree}
+        seconds={2}
+        playSoundUrl={`${PRINT_BASE}/play/couponuse.wav`}
+        onDone={() => {
+          setPromoCard((p) => ({ ...p, show: false }));
+          if (promoCard.isFree) {
+            showNotice("🔖 Free Session", "success", false, 2600);
+            setCurrentView("photobooth");
+            resetPayUi();
+          } else {
+            if (piId && payStatus === "requires_action") {
+              setShowPay(true);
+              if (!countdownRef.current) {
+                setTimeLeft(EXPIRE_SECONDS);
+                countdownRef.current = setInterval(() => {
+                  setTimeLeft((t) => {
+                    if (t <= 1) {
+                      clearInterval(countdownRef.current);
+                      countdownRef.current = null;
+                      expireSessionNow();
+                      return 0;
+                    }
+                    return t - 1;
+                  });
+                }, 1000);
               }
             }
-          }}
-        />
-      )}
-
-      <div className="flex-1 flex justify-center mt-10 px-6">{renderCurrentView()}</div>
-      <ForgotPinDialog
-        open={forgotOpen}
-        onOpenChange={setForgotOpen}
-        phone={forgotPhone}
-        afterReset={() => {
-          setCurrentView("login");
-          setWrongCount(0);
-          showNotice("โปรดใช้ PIN ใหม่ในการเข้าสู่ระบบ", "success", false, 3000);
+          }
         }}
       />
-    </WarpBackground>
-  );
+    )}
+
+    {/* โหมดถ่ายรูป */}
+    {currentView === "photobooth" ? (
+      <div className="fixed inset-0 z-[50]">
+        <PhotoboothInterface user={user} onLogout={handleLogout} />
+      </div>
+    ) : (
+      <div className="flex-1 flex justify-center mt-10 px-6">{renderCurrentView()}</div>
+    )}
+
+    <ForgotPinDialog
+      open={forgotOpen}
+      onOpenChange={setForgotOpen}
+      phone={forgotPhone}
+      afterReset={() => {
+        setCurrentView("login");
+        setWrongCount(0);
+        showNotice("โปรดใช้ PIN ใหม่ในการเข้าสู่ระบบ", "success", false, 3000);
+      }}
+    />
+  </WarpBackground>
+);
 }
