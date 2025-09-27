@@ -7,6 +7,7 @@ import { client } from "@/lib/photoboothClient";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader";
+import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { toast } from "sonner";
 
 const CAMERA_BASE = (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
@@ -245,7 +246,12 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
         <div className="flex items-center gap-2">
           <div className="px-3 py-1.5 rounded-full backdrop-blur-xl bg-black/40 text-white text-xs border border-white/20 shadow">
-            Photos: {photosTaken}/{MAX_PHOTOS}
+           <GradientText
+              className="text-sm text-gray-500 mt-1"
+              text={`Photos: ${photosTaken}/${MAX_PHOTOS}`}
+              neon
+              gradient="linear-gradient(90deg, #fecaca 0%, #fda4af 28%, #f9a8d4 62%, #c4b5fd 100%)"
+            />
           </div>
           <Button
             variant="outline"
@@ -279,14 +285,14 @@ export default function PhotoboothInterface({ user, onLogout }) {
               <Button
                 onClick={handleRetake}
                 variant="outline"
-                className={`h-14 px-6 text-base md:text-lg rounded-xl border-white/40 text-white bg-white/10 hover:bg-white/20 ${buttonsReady ? "" : "opacity-50 cursor-not-allowed"}`}
+                className={`h-14 px-6 text-base md:text-lg rounded-xl border-white/40 text-white bg-white/10 hover:bg-white/20 ${buttonsReady ? "ring-2 ring-rose-500/80 shadow-lg shadow-rose-500 md:shadow-xl md:shadow-rose-500" : "opacity-50 cursor-not-allowed"}`}
                 disabled={busy || redirecting || !buttonsReady}
               >
                 Retake
               </Button>
               <Button
                 onClick={handleConfirmCapture}
-                className={`h-14 px-8 text-base md:text-lg font-semibold rounded-xl shadow-lg ${buttonsReady ? "bg-white text-gray-900 hover:bg-gray-50" : "bg-gray-300 text-gray-600 cursor-not-allowed"}`}
+                className={`h-14 px-8 text-base md:text-lg font-semibold rounded-xl shadow-lg ${buttonsReady ? "bg-white text-gray-900 hover:bg-gray-50 ring-4 ring-cyan-500/50 shadow-lg shadow-cyan-500 md:shadow-xl md:shadow-cyan-500" : "bg-gray-300 text-gray-600 cursor-not-allowed"}`}
                 disabled={busy || redirecting || !buttonsReady}
               >
                 {busy ? "Processing…" : "Confirm"}
