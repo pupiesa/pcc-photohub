@@ -10,6 +10,7 @@ import { Loader } from "@/components/ui/shadcn-io/ai/loader";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { toast } from "sonner";
 
+const TEMPLATE_KEY = "kmitl2025";
 const CAMERA_BASE = (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
 
@@ -148,11 +149,14 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
         // เรียกสั่งพิมพ์
         try {
-          const apiRes = await fetch(`${PRINT_BASE}/print`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: nextPaths }),
-          });
+        const apiRes = await fetch(`${PRINT_BASE}/print`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paths: nextPaths,          // พาธไฟล์บนเครื่องฝั่งเซิร์ฟเวอร์ (หรือ data:image;base64)
+            templateKey: TEMPLATE_KEY, 
+          }),
+        });
           if (apiRes.ok) {
             fetch(`${PRINT_BASE}/play/print.wav`);
           } else {
