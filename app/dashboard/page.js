@@ -26,6 +26,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { Eye, EyeOff } from "lucide-react";
 import { useInView } from "react-intersection-observer";
+import { InlineEmailKeyboard, InlineOtpKeypad } from "@/components/InlineKeyboards";
+import TermsLegal from "@/components/TermsLegal";
 
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
@@ -45,7 +47,7 @@ const buildProxyPreviewSrcSet = (relPath) => ({
     ${buildProxyPreview(relPath, 300)} 300w,
     ${buildProxyPreview(relPath, 600)} 600w
   `,
-  lqip: `${buildProxyPreview(relPath, 20)}&lqip=true`, // URL สำหรับ LQIP
+  lqip: `${buildProxyPreview(relPath, 20)}&lqip=true`,
 });
 
 function deriveRelPath(it) {
@@ -69,6 +71,26 @@ function deriveRelPath(it) {
     }
   } catch {}
   return String(it?.name || "").replace(/^\/+/, "");
+}
+
+// แปลงชื่อไฟล์ capture_YYYYMMDD_HHMMSS.jpg → timestamp (ms)
+// ถ้า parse ไม่ได้ให้คืน 0 (จะไปอยู่ท้าย)
+function tsFromFilename(nameOrPath) {
+  const s = String(nameOrPath || "");
+  // รองรับทั้ง path และ filename
+  const m = s.match(/capture_(\d{8})_(\d{6})/);
+  if (!m) return 0;
+  const d = m[1]; // YYYYMMDD
+  const t = m[2]; // HHMMSS
+  const ts = Date.UTC(
+    Number(d.slice(0, 4)),
+    Number(d.slice(4, 6)) - 1,
+    Number(d.slice(6, 8)),
+    Number(t.slice(0, 2)),
+    Number(t.slice(2, 4)),
+    Number(t.slice(4, 6))
+  );
+  return isNaN(ts) ? 0 : ts;
 }
 
 function ProxyPreview({ item, onLoadingComplete, className }) {
@@ -99,13 +121,23 @@ function ProxyPreview({ item, onLoadingComplete, className }) {
 }
 
 /* ---------- Progressive Gallery ---------- */
-function PhotoCard({ item }) {
+function PhotoCard({ item, isNew }) {
   const [loaded, setLoaded] = useState(false);
   return (
     <div
       className="group relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
       title={item?.name}
     >
+      {/* NEW badge*/}
+      {isNew && (
+        <div className="absolute top-2 left-2 z-10">
+          <span className="animate-pulse px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white shadow">
+            NEW
+          </span>
+        </div>
+      )}
+
+      {/* skeleton */}
       <div
         className={`absolute inset-0 transition-opacity duration-300 ${
           loaded ? "opacity-0" : "opacity-100"
@@ -126,7 +158,7 @@ function PhotoCard({ item }) {
 }
 
 /* ---------- Grid + Infinite Scroll ---------- */
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 40;
 
 function useInfiniteInScrollArea({ rootRef, hasMore, loadMore, margin = "1000px" }) {
   const sentinelRef = useRef(null);
@@ -156,7 +188,7 @@ function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
     rootRef: scrollRef,
     hasMore,
     loadMore,
-    margin: "1000px",
+    margin: "500px",
   });
 
   return (
@@ -166,6 +198,7 @@ function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
           <PhotoCard
             key={`${it.name || it.path || "item"}-${idx}`}
             item={it}
+            isNew={idx < 2} // ไฮไลต์ 2 “ใหม่สุด”
           />
         ))}
       </div>
@@ -174,87 +207,13 @@ function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
   );
 }
 
-/* ---------- Inline Keyboards ---------- */
-function InlineOtpKeypad({ visible, setValue, onDone }) {
-  if (!visible) return null;
-  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
-  const press = (k) => {
-    if (k === "back") setValue((v) => v.slice(0, -1));
-    else if (k === "clear") setValue("");
-    else if (k === "paste") {
-      navigator.clipboard.readText().then((t) => {
-        setValue(String(t).replace(/\D/g, "").slice(0, 6));
-      }).catch(() => {});
-    } else setValue((v) => (v + k).replace(/\D/g, "").slice(0, 6));
-  };
-  return (
-    <div className="mt-3 rounded-xl border p-3 bg-muted/30">
-      <div className="grid grid-cols-3 gap-2">
-        {keys.slice(0, 9).map((k) => (
-          <Button key={k} variant="secondary" onClick={() => press(k)}>{k}</Button>
-        ))}
-        <Button variant="outline" onClick={() => press("clear")} className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
-        <Button variant="secondary" onClick={() => press("0")}>0</Button>
-        <Button variant="outline" onClick={() => press("back")}>⌫</Button>
-      </div>
-      <div className="flex gap-2 pt-2 justify-end">
-        <Button onClick={onDone}>เสร็จสิ้น</Button>
-      </div>
-    </div>
-  );
-}
-
-function InlineEmailKeyboard({ visible, setValue, onDone }) {
-  if (!visible) return null;
-  const rows = [
-    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-    ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
-    ["a", "s", "d", "f", "g", "h", "j", "k", "l", "@"],
-    ["z", "x", "c", "v", "b", "n", "m", ".", "_", "-"],
-  ];
-  const press = (k) => {
-    if (k === "back") setValue((v) => v.slice(0, -1));
-    else if (k === "clear") setValue("");
-    else if (k === "paste") {
-      navigator.clipboard.readText().then((t) => setValue(String(t))).catch(() => []);
-    } else setValue((v) => (v + k).slice(0, 254));
-  };
-  return (
-    <div className="mt-3 rounded-xl border p-3 bg-muted/30">
-      <div className="space-y-2">
-        <div className="flex gap-1 rounded-xl justify-start">
-          <Button variant="secondary" onClick={() => press("@gmail.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@gmail.com</Button>
-          <Button variant="secondary" onClick={() => press("@kmitl.ac.th")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@kmitl.ac.th</Button>
-          <Button variant="secondary" onClick={() => press("@outlook.com")} className="bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80">@outlook.com</Button>
-        </div>
-        {rows.map((row, idx) => (
-          <div key={idx} className="flex gap-1 justify-center">
-            {row.map((k) => (
-              <Button key={k} variant="secondary" className="min-w-9" onClick={() => press(k)}>
-                {k}
-              </Button>
-            ))}
-          </div>
-        ))}
-        <div className="flex gap-1 justify-end">
-          <Button variant="outline" onClick={() => press("clear")} className="bg-linear-65 from-red-700 to-red-700 text-white hover:opacity-80">ล้าง</Button>
-          <Button variant="outline" onClick={() => press("back")}>⌫</Button>
-        </div>
-        <div className="flex justify-end">
-          <Button onClick={onDone}>เสร็จสิ้น</Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ---------- Page ---------- */
 export default function CustomerDashboard() {
   const router = useRouter();
 
   const [phone, setPhone] = useState(null);
-  const [pin, setPin] = useState(null);           // เพิ่มอ่าน PIN จาก localStorage
-  const [showPin, setShowPin] = useState(false);  // ปุ่มโชว์/ซ่อน PIN
+  const [pin, setPin] = useState(null);
+  const [showPin, setShowPin] = useState(false);
 
   const [gallery, setGallery] = useState([]);
   const [summary, setSummary] = useState({ count: 0, link: null, hasEmail: false, displayName: null });
@@ -275,12 +234,11 @@ export default function CustomerDashboard() {
   const [otpSecsLeft, setOtpSecsLeft] = useState(OTP_TOTAL_SECS);
   const [canResend, setCanResend] = useState(false);
   const [otpTimerKey, setOtpTimerKey] = useState(0);
-  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25; // progress bar 25 sec blink red color
+  const isUrgent = otpSecsLeft > 0 && otpSecsLeft <= 25;
 
   // soft keyboards
   const [showEmailKb, setShowEmailKb] = useState(false);
   const [showOtpKb, setShowOtpKb] = useState(false);
-  const emailKbSuppressRef = useRef(false);
 
   const emailInputRef = useRef(null);
   const otpFirstSlotRef = useRef(null);
@@ -289,14 +247,15 @@ export default function CustomerDashboard() {
     try { if (el?.setSelectionRange) el.setSelectionRange(0, el.value?.length ?? 0); } catch {}
   };
 
-  // ✅ อ่าน phone/pin จาก localStorage; ไม่เด้งกลับ /booth ถ้าไม่มีค่า
+  // อ่าน phone/pin จาก localStorage
   useEffect(() => {
     const p = typeof window !== "undefined" ? localStorage.getItem("pcc_user_phone") : null;
     const pn = typeof window !== "undefined" ? localStorage.getItem("pcc_user_pin") : null;
     if (p) setPhone(p);
     if (pn) setPin(pn);
-  }, []); // คงที่เสมอ
+  }, []);
 
+  // โหลดข้อมูล + เรียงรูปใหม่สุดก่อน
   const load = async (p) => {
     setLoading(true); setError(null);
     try {
@@ -312,7 +271,14 @@ export default function CustomerDashboard() {
 
       const g = await client.getUserGallery(p);
       const onlyImages = (g?.files || []).filter((it) => IMAGE_RE.test(String(it?.name || "")));
-      setGallery(onlyImages);
+
+      // 🔥 เรียงใหม่สุดก่อนด้วยชื่อไฟล์ capture_YYYYMMDD_HHMMSS
+      const sorted = onlyImages
+        .map((it) => ({ ...it, __ts: tsFromFilename(it?.name || it?.path || "") }))
+        .sort((a, b) => b.__ts - a.__ts)
+        .map(({ __ts, ...rest }) => rest);
+
+      setGallery(sorted);
     } catch (e) {
       console.error("dashboard load error:", e);
       setError(e?.message || "Failed to load your gallery. Please try again.");
@@ -587,7 +553,7 @@ export default function CustomerDashboard() {
                   <div className="font-medium">ยืนยันอีเมลเพื่อใช้ยืนยันตัวตนและกู้คืน PIN</div>
                   <Button onClick={() => {
                     setFlowError(null); setEmail(""); setConsent(false); setOtp("");
-                    setStep("email"); setOpenEmailFlow(true); emailKbSuppressRef.current = false;
+                    setStep("email"); setOpenEmailFlow(true);
                   }}>ใส่/ยืนยันอีเมล</Button>
                   <GradientText
                     className="text-xs text-gray-500 mt-1"
@@ -620,11 +586,10 @@ export default function CustomerDashboard() {
             setStep("email"); setOtp(""); setFlowError(null);
             setSending(false); setCanResend(false);
             setShowEmailKb(false); setShowOtpKb(false);
-            emailKbSuppressRef.current = false;
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-166">
           {step === "email" && (
             <>
               <DialogHeader>
@@ -665,11 +630,7 @@ export default function CustomerDashboard() {
                   <InlineEmailKeyboard
                     visible={showEmailKb}
                     setValue={setEmail}
-                    onDone={() => {
-                      emailKbSuppressRef.current = true;
-                      setShowEmailKb(false);
-                      setTimeout(() => { emailKbSuppressRef.current = false; }, 400);
-                    }}
+                    onDone={() => setShowEmailKb(false)}
                   />
                 </div>
 
@@ -684,54 +645,18 @@ export default function CustomerDashboard() {
           )}
 
           {step === "terms" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>เงื่อนไขการใช้งาน</DialogTitle>
-                <DialogDescription>โปรดอ่านและยอมรับก่อนรับรหัส OTP</DialogDescription>
-              </DialogHeader>
-
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <ScrollArea className="h-44 rounded-md border p-3 text-sm leading-6">
-                    <ul className="list-disc pl-5 space-y-2">
-                      <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
-                      <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
-                      <li>กรุณาเก็บรักษา <strong>รหัส OTP และลิงก์แชร์</strong> ไว้เป็นความลับ เพื่อความปลอดภัยของคุณ</li>
-                      <li><strong>ข้อควรระวัง:</strong> การเปิดเผยรหัสหรือลิงก์แก่บุคคลอื่น อาจทำให้ข้อมูลรั่วไหล pccphoto-hub ไม่รับผิดชอบต่อความเสียหายที่เกิดจากการเผยแพร่เอง</li>
-                      <li>คุณยอมรับและอนุญาตให้ <strong>pccphoto-hub</strong> เก็บและใช้ข้อมูลที่เกี่ยวข้อง เพื่อการให้บริการและตามที่กฎหมายกำหนด</li>
-                      <li>คุณมีสิทธิ์ <strong>ขอแก้ไข หรือลบข้อมูล</strong> ตามสิทธิที่กฎหมายคุ้มครอง</li>
-                      <li>การดำเนินการต่อ ถือว่าคุณได้ <strong>ยอมรับเงื่อนไขและนโยบายความเป็นส่วนตัว</strong> แล้ว</li>
-                    </ul>
-                  </ScrollArea>
-
-                  <div className="flex items-start gap-2 pt-2">
-                    <Checkbox id="consent" checked={consent} onCheckedChange={(v) => setConsent(Boolean(v))} />
-                    <Label htmlFor="consent" className="text-sm leading-6">
-                      ฉันได้อ่านและยอมรับเงื่อนไขการใช้งานและนโยบายความเป็นส่วนตัว
-                    </Label>
-                  </div>
-                </div>
-
-                {flowError && <div className="text-sm text-red-600">{flowError}</div>}
-              </div>
-
-              <DialogFooter className="mt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setStep("email");
-                    setFlowError(null);
-                    setTimeout(() => emailInputRef.current?.focus({ preventScroll: true }), 30);
-                    setShowEmailKb(true);
-                  }}
-                >
-                  กลับ
-                </Button>
-                <Button onClick={handleSendOtp} disabled={!consent || sending}>
-                  {sending ? (<><Loader size={16} className="mr-2" />กำลังส่ง…</>) : ("ถัดไป")}
-                </Button>
-              </DialogFooter>
-            </>
+            <TermsLegal
+              consent={consent}
+              setConsent={setConsent}
+              flowError={flowError}
+              sending={sending}
+              onBack={() => {
+                setStep("email");
+                setFlowError(null);
+                setShowEmailKb(true);
+              }}
+              onNext={handleSendOtp}
+            />
           )}
 
           {step === "otp" && (

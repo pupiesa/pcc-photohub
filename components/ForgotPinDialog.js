@@ -16,30 +16,37 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
 /* ---------- Inline Soft Keyboard (ตัวเลข/OTP) ---------- */
-function InlineOtpKeypad({ visible, setValue, onDone, maxLen = 6 }) {
+const keyBtn = "h-14 min-w-[3.2rem] text-lg rounded-xl";
+const wideBtn = "h-14 px-5 text-lg rounded-xl bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80";
+const wideBtn2 = "h-14 px-5 text-lg rounded-xl hover:opacity-80";
+
+
+export function InlineOtpKeypad({ visible, setValue, onDone }) {
   if (!visible) return null;
   const keys = ["1","2","3","4","5","6","7","8","9","0"];
   const press = (k) => {
     if (k === "back") setValue((v) => v.slice(0, -1));
     else if (k === "clear") setValue("");
     else if (k === "paste") {
-      navigator.clipboard.readText().then((t) => {
-        setValue(String(t).replace(/\D/g, "").slice(0, maxLen));
-      }).catch(() => {});
-    } else setValue((v) => (v + k).replace(/\D/g, "").slice(0, maxLen));
+      navigator.clipboard.readText()
+        .then((t) => setValue(String(t).replace(/\D/g, "").slice(0, 6)))
+        .catch(() => {});
+    } else {
+      setValue((v) => (v + k).replace(/\D/g, "").slice(0, 6));
+    }
   };
   return (
-    <div className="mt-3 rounded-xl border p-3 bg-muted/30">
-      <div className="grid grid-cols-3 gap-2">
+    <div className="mt-3 rounded-2xl border p-3 bg-muted/30">
+      <div className="grid grid-cols-3 gap-3">
         {keys.slice(0, 9).map((k) => (
-          <Button key={k} variant="secondary" onClick={() => press(k)}>{k}</Button>
+          <Button key={k} variant="secondary" className={keyBtn} onClick={() => press(k)}>{k}</Button>
         ))}
-        <Button variant="default" onClick={() => press("clear")} className="bg-red-500 text-white hover:bg-red-700">ล้าง</Button>
-        <Button variant="secondary" onClick={() => press("0")}>0</Button>
-        <Button variant="outline" onClick={() => press("back")}>⌫</Button>
+        <Button variant="destructive" className={wideBtn2} onClick={() => press("clear")}>ล้าง</Button>
+        <Button variant="secondary" className={wideBtn2} onClick={() => press("0")}>0</Button>
+        <Button variant="outline" className={wideBtn2} onClick={() => press("back")}>⌫</Button>
       </div>
-      <div className="flex gap-2 pt-2 justify-between end-side">
-        <Button onClick={onDone}>เสร็จสิ้น</Button>
+      <div className="flex gap-3 pt-3 justify-end">
+        <Button className={wideBtn2} onClick={onDone}>เสร็จสิ้น</Button>
       </div>
     </div>
   );
