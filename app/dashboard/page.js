@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -405,7 +404,7 @@ export default function CustomerDashboard() {
       setShowOtpKb(true);
       setShowEmailKb(false);
     } catch (e) {
-      console.error(e);
+      //console.error(e);
       if (isDuplicateEmailError(e)) {
         toast.error("อีเมลนี้ถูกใช้แล้ว โปรดใช้อีเมลอื่น", { duration: 5000 });
         setStep("email");
@@ -428,7 +427,7 @@ export default function CustomerDashboard() {
       setCanResend(false);
       toast.success("ส่งรหัส OTP ใหม่แล้ว ตรวจอีเมลของคุณ");
     } catch (e) {
-      console.error(e);
+      //console.error(e);
       setFlowError(e?.message || "ส่งรหัส OTP ล้มเหลว กรุณาลองใหม่");
       toast.error(e?.message || "ส่งรหัส OTP ล้มเหลว");
     } finally { setSending(false); }
@@ -447,7 +446,7 @@ export default function CustomerDashboard() {
       setShowOtpKb(false);
       refresh();
     } catch (e) {
-      console.error(e);
+      //console.error(e);
       setFlowError(e?.message || "ยืนยันรหัสไม่สำเร็จ กรุณาลองใหม่");
       toast.error(e?.message || "ยืนยันรหัสไม่สำเร็จ");
     } finally { setSending(false); }

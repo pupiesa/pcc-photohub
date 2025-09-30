@@ -23,6 +23,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const pathname = usePathname();
 
   const [countdown, setCountdown] = useState(null);
+  const [shooting, setShooting] = useState(false);
   const [photosTaken, setPhotosTaken] = useState(0);
   const [capturedImage, setCapturedImage] = useState(null);
   const [capturedServerPath, setCapturedServerPath] = useState(null);
@@ -35,7 +36,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
   useEffect(() => {
     if (capturedImage) {
       setButtonsReady(false);
-      const t = setTimeout(() => setButtonsReady(true), 5000);
+      const t = setTimeout(() => setButtonsReady(true), 2500);
       return () => clearTimeout(t);
     }
     setButtonsReady(false);
@@ -76,15 +77,19 @@ export default function PhotoboothInterface({ user, onLogout }) {
   }, [pathname]);
 
   const startPhotoshoot = () => {
+    setShooting(true);
     fetch(`${PRINT_BASE}/play/321.wav`);
     let count = 3;
     setCountdown(count);
     const timer = setInterval(() => {
       count--;
       if (count > 0) setCountdown(count);
-      else {
+      else{
         setCountdown("📸");
-        setTimeout(() => { setCountdown(null); handleCapture(); }, 500);
+        setTimeout(() => {
+          setCountdown(null);
+          handleCapture();
+        }, 500);
         clearInterval(timer);
       }
     }, 1000);
@@ -102,8 +107,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
       setCapturedImage(`${CAMERA_BASE}${url}?ts=${Date.now()}`);
       setCapturedServerPath(data?.serverPath || null);
     } catch (err) {
-      //console.error(err);
-      toast.error("ถ่ายภาพไม่สำเร็จ");//alert("ถ่ายภาพไม่สำเร็จ");
+      toast.error("ถ่ายภาพไม่สำเร็จ");
+    } finally {
+      setShooting(false);
     }
   };
 
@@ -149,14 +155,14 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
         // เรียกสั่งพิมพ์
         try {
-        const apiRes = await fetch(`${PRINT_BASE}/print`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            paths: nextPaths,          // พาธไฟล์บนเครื่องฝั่งเซิร์ฟเวอร์ (หรือ data:image;base64)
-            templateKey: TEMPLATE_KEY, 
-          }),
-        });
+          const apiRes = await fetch(`${PRINT_BASE}/print`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paths: nextPaths,
+              templateKey: TEMPLATE_KEY,
+            }),
+          });
           if (apiRes.ok) {
             fetch(`${PRINT_BASE}/play/print.wav`);
           } else {
@@ -180,7 +186,6 @@ export default function PhotoboothInterface({ user, onLogout }) {
       }
     } catch (err) {
       console.error(err);
-      //alert("ยืนยันรูปไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -192,6 +197,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
     setCountdown(null);
     setLiveLoading(true);
   };
+
+  const hideUi = shooting && !capturedImage; // กำลังนับ/ลั่น และยังไม่แสดงรูป
 
   return (
     <div className="fixed inset-0 z-20 bg-black">
@@ -237,20 +244,23 @@ export default function PhotoboothInterface({ user, onLogout }) {
         </div>
       )}
 
-      {/* แถบควบคุมบน (ซ้าย: Logout / ขวา: Fill/Contain) */}
-      <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
-      <Button
-        onClick={onLogout}
-        className="bg-rose-500/80 hover:bg-rose-500/90 text-white border border-rose-300/50 backdrop-blur-xl  shadow-lg shadow-cyan-500/50"
-        disabled={busy || redirecting}
+      {/* แถบควบคุมบน (ซ้าย: Logout / ขวา: Fill/Contain) — ซ่อนชั่วคราวตอนกำลังถ่าย */}
+      <div
+        className={`absolute top-4 left-4 right-4 flex items-center justify-between transition-all duration-200 ${
+          hideUi ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
       >
-        Logout
-      </Button>
-
+        <Button
+          onClick={onLogout}
+          className="bg-rose-500/80 hover:bg-rose-500/90 text-white border border-rose-300/50 backdrop-blur-xl  shadow-lg shadow-cyan-500/50"
+          disabled={busy || redirecting || hideUi}
+        >
+          Logout
+        </Button>
 
         <div className="flex items-center gap-2">
           <div className="px-3 py-1.5 rounded-full backdrop-blur-xl bg-black/40 text-white text-xs border border-white/20 shadow">
-           <GradientText
+            <GradientText
               className="text-sm text-gray-500 mt-1"
               text={`Photos: ${photosTaken}/${MAX_PHOTOS}`}
               neon
@@ -261,14 +271,19 @@ export default function PhotoboothInterface({ user, onLogout }) {
             variant="outline"
             onClick={() => setFitMode((m) => (m === "cover" ? "contain" : "cover"))}
             className="backdrop-blur-md bg-white/10 text-white border-white/30 hover:bg-white/20"
+            disabled={hideUi}
           >
             {fitMode === "cover" ? "Fill" : "Contain"}
           </Button>
         </div>
       </div>
 
-      {/* แถบปุ่มกึ่งกลางด้านล่าง (กระจกใส + เบลอพื้นหลัง) */}
-      <div className="absolute inset-x-0 bottom-6 flex justify-center px-4">
+      {/* แถบปุ่มกึ่งกลางด้านล่าง — ซ่อนทั้งหมดตอนกำลังถ่าย */}
+      <div
+        className={`absolute inset-x-0 bottom-6 flex justify-center px-4 transition-all duration-200 ${
+          hideUi ? "opacity-0 pointer-events-none translate-y-2" : "opacity-100 translate-y-0"
+        }`}
+      >
         <div className="w-full max-w-[720px] rounded-2xl border border-white/15 bg-black/35 backdrop-blur-2xl shadow-[0_10px_40px_rgba(0,0,0,.45)] p-3">
           {!capturedImage ? (
             <div className="flex items-center justify-center gap-3">
@@ -276,7 +291,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
                 <Button
                   onClick={startPhotoshoot}
                   className="h-16 px-8 text-xl font-bold rounded-xl bg-white text-gray-900 hover:bg-gray-50 shadow-lg"
-                  disabled={!CAMERA_BASE || busy || redirecting}
+                  disabled={!CAMERA_BASE || busy || redirecting || hideUi}
                 >
                   Take Photo {photosTaken + 1}
                 </Button>
@@ -289,14 +304,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
               <Button
                 onClick={handleRetake}
                 variant="outline"
-                className={`h-14 px-6 text-base md:text-lg rounded-xl border-white/40 text-white bg-white/10 hover:bg-white/20 ${buttonsReady ? "ring-2 ring-rose-500/80 shadow-lg shadow-rose-500 md:shadow-xl md:shadow-rose-500" : "opacity-50 cursor-not-allowed"}`}
+                className={`h-14 px-6 text-base md:text-lg rounded-xl border-white/40 text-white bg-white/10 hover:bg-white/20 ${
+                  buttonsReady ? "ring-2 ring-rose-500/80 shadow-lg shadow-rose-500 md:shadow-xl md:shadow-rose-500" : "opacity-50 cursor-not-allowed"
+                }`}
                 disabled={busy || redirecting || !buttonsReady}
               >
                 Retake
               </Button>
               <Button
                 onClick={handleConfirmCapture}
-                className={`h-14 px-8 text-base md:text-lg font-semibold rounded-xl shadow-lg ${buttonsReady ? "bg-white text-gray-900 hover:bg-gray-50 ring-4 ring-cyan-500/50 shadow-lg shadow-cyan-500 md:shadow-xl md:shadow-cyan-500" : "bg-gray-300 text-gray-600 cursor-not-allowed"}`}
+                className={`h-14 px-8 text-base md:text-lg font-semibold rounded-xl shadow-lg ${
+                  buttonsReady ? "bg-white text-gray-900 hover:bg-gray-50 ring-4 ring-cyan-500/50 shadow-lg shadow-cyan-500 md:shadow-xl md:shadow-cyan-500" : "bg-gray-300 text-gray-600 cursor-not-allowed"
+                }`}
                 disabled={busy || redirecting || !buttonsReady}
               >
                 {busy ? "Processing…" : "Confirm"}

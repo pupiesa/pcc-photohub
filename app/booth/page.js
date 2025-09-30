@@ -232,80 +232,89 @@ export default function BoothPage() {
   };
 
   const startPayment = async (code) => {
-    if (!user?.phone) { showNotice("กรุณาเข้าสู่ระบบก่อน", "warn", false, 3000); return; }
+  if (!user?.phone) { showNotice("กรุณาเข้าสู่ระบบก่อน", "warn", false, 3000); return; }
 
-    setLoadingPay(true);
-    setQrUrl(""); setPiId(""); setPayStatus("");
-    try {
-      const couponCode = (typeof code === "string" ? code : "")?.trim();
+  setLoadingPay(true);
+  setQrUrl(""); setPiId(""); setPayStatus("");
+  try {
+    const couponCode = (typeof code === "string" ? code : "")?.trim();
 
-      const r = await fetch("/api/pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          promoCode: couponCode || null,
-          userNumber: user?.phone,
-          orderAmount: BASE_ORDER_AMOUNT,
-        }),
+    const r = await fetch("/api/pay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        promoCode: couponCode || null,
+        userNumber: user?.phone,
+        orderAmount: BASE_ORDER_AMOUNT,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.message || "PAY_CREATE_FAILED");
+
+    const amountTHB = Number(data.amountTHB);
+    const discountTHB = Math.max(0, BASE_ORDER_AMOUNT - (isNaN(amountTHB) ? BASE_ORDER_AMOUNT : amountTHB));
+    const usedCoupon = Boolean(couponCode);
+    const couponSucceeded = usedCoupon && discountTHB > 0;
+
+    if (couponSucceeded) {
+      setCouponInput("");                      
+      autoFiredRef.current = false;          
+      requestAnimationFrame(() => {
+        couponRef.current?.focus?.({ preventScroll: true });
       });
-      const data = await r.json();
-      if (!r.ok || !data.ok) throw new Error(data.message || "PAY_CREATE_FAILED");
 
-      const amountTHB = Number(data.amountTHB);
-      const discountTHB = Math.max(0, BASE_ORDER_AMOUNT - (isNaN(amountTHB) ? BASE_ORDER_AMOUNT : amountTHB));
-      const usedCoupon = Boolean(couponCode);
-      const couponSucceeded = usedCoupon && discountTHB > 0;
-      if (couponSucceeded) {
-        const isFree = amountTHB === 0;
-        setPromoCard({ show: true, amount: discountTHB, isFree });
-        setQrUrl(data.qr || "");
-        setPiId(data.paymentIntentId || "");
-        setPayStatus(data.amountTHB === 0 ? "succeeded" : "requires_action");
-        return;
-      }
-
-      if (amountTHB === 0) {
-        setCurrentView("photobooth");
-        resetPayUi();
-        return;
-      }
-      fetch(`${PRINT_BASE}/play/pay.wav`);
-      setQrUrl(data.qr);
-      setPiId(data.paymentIntentId);
-      setPayStatus("requires_action");
-      setShowPay(true);
-
-      setTimeLeft(EXPIRE_SECONDS);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      countdownRef.current = setInterval(() => {
-        setTimeLeft((t) => {
-          if (t <= 1) {
-            clearInterval(countdownRef.current);
-            countdownRef.current = null;
-            expireSessionNow();
-            return 0;
-          }
-          return t - 1;
-        });
-      }, 1000);
-    } catch (e) {
-      console.error("Create pay failed:", e);
-      const couponCode = (typeof code === "string" ? code : "")?.trim();
-      if (couponCode && couponCode.length === AUTO_REDEEM_LEN) {
-        showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);
-        setShowPay(false);
-        setQrUrl(""); setPiId(""); setPayStatus("");
-        setCouponInput("");
-        requestAnimationFrame(() => {
-          couponRef.current?.focus?.({ preventScroll: true });
-        });
-        return;
-      }
-      backToLoginOnFail("สร้างการชำระเงินไม่สำเร็จ");
-    } finally {
-      setLoadingPay(false);
+      const isFree = amountTHB === 0;
+      setPromoCard({ show: true, amount: discountTHB, isFree });
+      setQrUrl(data.qr || "");
+      setPiId(data.paymentIntentId || "");
+      setPayStatus(data.amountTHB === 0 ? "succeeded" : "requires_action");
+      return;
     }
-  };
+
+    if (amountTHB === 0) {
+      setCouponInput("");                      
+      setCurrentView("photobooth");
+      resetPayUi();
+      return;
+    }
+
+    fetch(`${PRINT_BASE}/play/pay.wav`);
+    setQrUrl(data.qr);
+    setPiId(data.paymentIntentId);
+    setPayStatus("requires_action");
+    setShowPay(true);
+
+    setTimeLeft(EXPIRE_SECONDS);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownRef.current = setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
+          expireSessionNow();
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+  } catch (e) {
+    console.error("Create pay failed:", e);
+    const couponCode = (typeof code === "string" ? code : "")?.trim();
+    if (couponCode && couponCode.length === AUTO_REDEEM_LEN) {
+      showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);
+      setShowPay(false);
+      setQrUrl(""); setPiId(""); setPayStatus("");
+      setCouponInput("");                       
+      requestAnimationFrame(() => {
+        couponRef.current?.focus?.({ preventScroll: true });
+      });
+      return;
+    }
+    backToLoginOnFail("สร้างการชำระเงินไม่สำเร็จ");
+  } finally {
+    setLoadingPay(false);
+  }
+};
 
   const expireSessionNow = async () => {
     if (!piId) { backToLoginOnFail("หมดเวลา กรุณาลองใหม่"); return; }

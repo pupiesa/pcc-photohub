@@ -25,7 +25,7 @@ export default function TermsLegal({
 
       <div className="grid gap-4">
         <div className="grid gap-2">
-          <ScrollArea className="h-44 rounded-md border p-3 text-sm leading-6">
+          <ScrollArea className="h65 rounded-md border p-3 text-sm leading-6">
             <ul className="list-disc pl-5 space-y-2">
               <li>ระบบจะส่ง <strong>รหัส OTP 6 หลัก</strong> ไปยังอีเมลที่คุณระบุ เพื่อใช้ยืนยันตัวตน</li>
               <li>อีเมลที่ยืนยันแล้ว จะใช้สำหรับ <strong>ลิงก์รูปภาพ และการแจ้งเตือนบริการ</strong> เท่านั้น</li>
@@ -37,11 +37,47 @@ export default function TermsLegal({
             </ul>
           </ScrollArea>
 
-          <div className="flex items-start gap-2 pt-2">
-            <Checkbox id="consent" checked={consent} onCheckedChange={(v) => setConsent(Boolean(v))} />
-            <Label htmlFor="consent" className="text-sm leading-6">
-              ฉันได้อ่านและยอมรับเงื่อนไขการใช้งานและนโยบายความเป็นส่วนตัว
-            </Label>
+        <div
+  className={[
+    "mt-2 rounded-xl border p-3 transition-all",
+    consent
+      ? "border-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/20 shadow-[0_0_0_3px_rgba(16,185,129,.25)]"
+      : "border-gray-300/70 hover:border-gray-400/80"
+  ].join(" ")}
+>
+  <div className="flex items-start gap-3">
+    <Checkbox
+      id="consent"
+      checked={consent}
+      onCheckedChange={(v) => setConsent(Boolean(v))}
+      className={[
+        "h-6 w-6 rounded-md border-2",
+        "data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600",
+        "focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
+        "transition-colors"
+      ].join(" ")}
+    />
+
+    <div className="space-y-1">
+      <Label
+        htmlFor="consent"
+        className="cursor-pointer text-[0.95rem] md:text-base leading-6 font-semibold"
+      >
+        ฉันได้อ่านและยอมรับ
+        <span className="underline-offset-2">
+          เงื่อนไขการใช้งาน
+        </span>
+        และ
+        <span className=" underline-offset-2">
+          นโยบายความเป็นส่วนตัว
+        </span>
+      </Label>
+
+      <p className="text-xs text-muted-foreground">
+        คุณไม่สามารถเพิกถอนความยินยอมได้ภายหลัง
+      </p>
+              </div>
+            </div>
           </div>
         </div>
 

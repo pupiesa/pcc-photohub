@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 // ปุ่มขนาดใหญ่สำหรับ kiosk
 const keyBtn = "h-14 min-w-[3.2rem] text-lg rounded-xl";
 const wideBtn = "h-14 px-5 text-lg rounded-xl bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80";
-const wideBtn2 = "h-14 px-5 text-lg rounded-xl";
+const wideBtn2 = "h-14 px-5 text-lg rounded-xl hover:opacity-80";
 
 
 export function InlineOtpKeypad({ visible, setValue, onDone }) {

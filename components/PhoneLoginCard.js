@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useEffect , useRef} from "react";
+import { useState, useRef } from "react";
 import { client } from "@/lib/photoboothClient"; // ใช้ ensureUserAndPin / getUserByNumber
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -14,7 +13,7 @@ import { ArrowLeft, Phone, Shield, UserPlus } from "lucide-react";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader"; // ใช้ Loader ตามที่ต้องการ
 
 const PRINT_HOST = (process.env.PRINT_API_HOST || "127.0.0.1");
-const PRINT_PORT = (process.env.PRINT_API_PORT || "5000")
+const PRINT_PORT = (process.env.PRINT_API_PORT || "5000");
 const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
 
 /**
@@ -32,10 +31,10 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errMsg, setErrMsg] = useState("");
   const hasPlayedSound = useRef(false);
-  
+
   if (!hasPlayedSound.current) {
     fetch(`${PRINT_BASE}/play/phone.wav`);
-    hasPlayedSound.current = true; 
+    hasPlayedSound.current = true;
   }
 
   const formatPhoneDisplay = (phone) => {
@@ -44,27 +43,38 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
     return `${phone.slice(0, 3)}-${phone.slice(3, 6)}-${phone.slice(6)}`;
   };
 
+  // เช็คว่าเป็นเลขซ้ำ 10 ตัวหรือไม่ เช่น 0000000000, 1111111111, ...
+  const isTenSameDigits = (s) => /^(\d)\1{9}$/.test(s);
+
   const handlePhoneSubmit = async () => {
     if (phoneNumber.length < 10) return;
     setIsLoading(true);
     setErrMsg("");
+
     try {
-      // เช็คว่ามี user ไหม เพื่อกำหนดโฟลว์
+      // 1) เช็คก่อนว่ามีผู้ใช้อยู่แล้วหรือไม่
       await client.getUserByNumber(phoneNumber);
       setMode("login");
       fetch(`${PRINT_BASE}/play/pass.wav`);
+      setStep("otp");
+      setIsLoading(false);
     } catch (e) {
       if (e?.status === 404) {
+        if (isTenSameDigits(phoneNumber)) {
+          setErrMsg("ไม่อนุญาตให้ใช้เบอร์ที่เป็นเลขซ้ำกันครบ 10 ตัวสำหรับการสมัครใหม่");
+          //fetch(`${PRINT_BASE}/play/passagainwrong.wav`);
+          setIsLoading(false);
+          return;
+        }
         setMode("signup");
         fetch(`${PRINT_BASE}/play/createpass.wav`);
+        setStep("otp");
+        setIsLoading(false);
       } else {
         setErrMsg("Unable to check user. Please try again.");
         setIsLoading(false);
-        return;
       }
     }
-    setStep("otp");
-    setIsLoading(false);
   };
 
   const handleNextOrConfirm = async () => {
@@ -75,7 +85,6 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
         fetch(`${PRINT_BASE}/play/passagain.wav`);
       } else {
         onLogin?.({ phone: phoneNumber, pin, mode: "login" });
-        //fetch(`${PRINT_BASE}/play/promo.wav`);
       }
       return;
     }
@@ -88,9 +97,7 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
         return;
       }
       onLogin?.({ phone: phoneNumber, pin, mode: "signup" });
-      //fetch(`${PRINT_BASE}/play/promo.wav`);
     }
-    
   };
 
   const handleNumberPad = (digit) => {
@@ -167,6 +174,9 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
                   <Phone className="w-5 h-5 text-gray-400 dark:text-gray-500" />
                 </div>
               </div>
+              {!!errMsg && (
+                <div className="text-xs text-rose-600 dark:text-rose-400 mt-1">{errMsg}</div>
+              )}
             </div>
           </div>
         )}
@@ -189,7 +199,9 @@ const PhoneLoginCard = ({ onBack, onLogin, onForgotPin }) => {
                 placeholder="_ _ _ _ _ _"
                 className="text-center text-2xl font-mono h-16 text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/50 tracking-widest border-gray-200 dark:border-gray-700"
               />
-              {!!errMsg && <div className="text-xs text-rose-600 dark:text-rose-400">{errMsg}</div>}
+              {!!errMsg && step !== "phone" && (
+                <div className="text-xs text-rose-600 dark:text-rose-400">{errMsg}</div>
+              )}
             </div>
           </div>
         )}
