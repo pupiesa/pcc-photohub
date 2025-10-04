@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import { client } from "@/lib/photoboothClient";
@@ -17,16 +16,15 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { BackgroundGradient } from "@/components/ui/shadcn-io/background-gradient";
-import { Skeleton } from "@/components/ui/skeleton";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { Eye, EyeOff } from "lucide-react";
-import { useInView } from "react-intersection-observer";
-import { InlineEmailKeyboard, InlineOtpKeypad } from "@/components/InlineKeyboards";
-import TermsLegal from "@/components/TermsLegal";
+import { InlineEmailKeyboard, InlineOtpKeypad } from "@/components/dashboard/InlineKeyboards";
+import TermsLegal from "@/components/dashboard/TermsLegal";
+import GalleryLightboxCard from "@/components/dashboard/GalleryLightboxCard";
+import { Navbar03 } from "@/components/ui/shadcn-io/navbar-03";
 
 /* ---------- helpers ---------- */
 const IMAGE_RE = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
@@ -35,42 +33,6 @@ const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
 const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
 
 const OTP_TOTAL_SECS = (parseInt(process.env.OTP_TTL_MIN) || 1) * 60;
-
-const buildProxyPreview = (relPath, size = 300) =>
-  `/ncapi/api/nextcloud/preview?path=${encodeURIComponent(relPath)}&width=${size}&height=${size}&quality=80`;
-
-const buildProxyPreviewSrcSet = (relPath) => ({
-  src: buildProxyPreview(relPath, 300),
-  srcSet: `
-    ${buildProxyPreview(relPath, 150)} 150w,
-    ${buildProxyPreview(relPath, 300)} 300w,
-    ${buildProxyPreview(relPath, 600)} 600w
-  `,
-  lqip: `${buildProxyPreview(relPath, 20)}&lqip=true`,
-});
-
-function deriveRelPath(it) {
-  if (it?.path) return String(it.path).replace(/^\/+/, "");
-  try {
-    if (it?.previewUrl) {
-      const u = new URL(it.previewUrl);
-      const f = u.searchParams.get("file");
-      if (f) return decodeURIComponent(f).replace(/^\/+/, "");
-    }
-  } catch {}
-  try {
-    if (it?.downloadUrl) {
-      const u = new URL(it.downloadUrl);
-      const p = u.searchParams.get("path");
-      const files = u.searchParams.get("files");
-      if (files) {
-        const dir = p ? decodeURIComponent(p).replace(/^\/+/, "") : "";
-        return dir ? `${dir}/${files}` : files;
-      }
-    }
-  } catch {}
-  return String(it?.name || "").replace(/^\/+/, "");
-}
 
 // แปลงชื่อไฟล์ capture_YYYYMMDD_HHMMSS.jpg → timestamp (ms)
 // ถ้า parse ไม่ได้ให้คืน 0 (จะไปอยู่ท้าย)
@@ -90,120 +52,6 @@ function tsFromFilename(nameOrPath) {
     Number(t.slice(4, 6))
   );
   return isNaN(ts) ? 0 : ts;
-}
-
-function ProxyPreview({ item, onLoadingComplete, className }) {
-  const { ref, inView } = useInView({ triggerOnce: true });
-  const rel = deriveRelPath(item);
-  if (!rel) return <div className="w-full aspect-square bg-gray-200/20 rounded" />;
-  const { src, srcSet, lqip } = buildProxyPreviewSrcSet(rel);
-  return (
-    <div ref={ref} className={`relative w-full aspect-square ${className || ""}`}>
-      {inView ? (
-        <Image
-          src={src}
-          srcSet={srcSet}
-          alt={item?.name || "preview"}
-          fill
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 20vw"
-          className="object-cover select-none"
-          placeholder="blur"
-          blurDataURL={lqip}
-          loading="lazy"
-          onLoadingComplete={onLoadingComplete}
-        />
-      ) : (
-        <div className="w-full aspect-square bg-gray-200/20 rounded" />
-      )}
-    </div>
-  );
-}
-
-/* ---------- Progressive Gallery ---------- */
-function PhotoCard({ item, isNew }) {
-  const [loaded, setLoaded] = useState(false);
-  return (
-    <div
-      className="group relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
-      title={item?.name}
-    >
-      {/* NEW badge*/}
-      {isNew && (
-        <div className="absolute top-2 left-2 z-10">
-          <span className="animate-pulse px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white shadow">
-            NEW
-          </span>
-        </div>
-      )}
-
-      {/* skeleton */}
-      <div
-        className={`absolute inset-0 transition-opacity duration-300 ${
-          loaded ? "opacity-0" : "opacity-100"
-        }`}
-      >
-        <div className="w-full h-full">
-          <div className="w-full h-full bg-gray-200/10 dark:bg-gray-700/30" />
-        </div>
-      </div>
-
-      <ProxyPreview
-        item={item}
-        className={`transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-        onLoadingComplete={() => setLoaded(true)}
-      />
-    </div>
-  );
-}
-
-/* ---------- Grid + Infinite Scroll ---------- */
-const PAGE_SIZE = 40;
-
-function useInfiniteInScrollArea({ rootRef, hasMore, loadMore, margin = "1000px" }) {
-  const sentinelRef = useRef(null);
-  useEffect(() => {
-    if (!rootRef.current || !sentinelRef.current) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        const first = entries[0];
-        if (first?.isIntersecting && hasMore) loadMore();
-      },
-      { root: rootRef.current, rootMargin: margin, threshold: 0.01 }
-    );
-    io.observe(sentinelRef.current);
-    return () => io.disconnect();
-  }, [rootRef, hasMore, loadMore, margin]);
-  return { sentinelRef };
-}
-
-function GalleryScrollGrid({ gallery, heightClass = "h-[55vh]" }) {
-  const scrollRef = useRef(null);
-  const [page, setPage] = useState(1);
-  const visible = useMemo(() => gallery.slice(0, page * PAGE_SIZE), [gallery, page]);
-  const hasMore = visible.length < gallery.length;
-  const loadMore = useCallback(() => setPage((p) => p + 1), []);
-
-  const { sentinelRef } = useInfiniteInScrollArea({
-    rootRef: scrollRef,
-    hasMore,
-    loadMore,
-    margin: "500px",
-  });
-
-  return (
-    <ScrollArea ref={scrollRef} className={`${heightClass} pr-2`}>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {visible.map((it, idx) => (
-          <PhotoCard
-            key={`${it.name || it.path || "item"}-${idx}`}
-            item={it}
-            isNew={idx < 2} // ไฮไลต์ 2 “ใหม่สุด”
-          />
-        ))}
-      </div>
-      <div ref={sentinelRef} className="h-6 w-full" />
-    </ScrollArea>
-  );
 }
 
 /* ---------- Page ---------- */
@@ -271,7 +119,7 @@ export default function CustomerDashboard() {
       const g = await client.getUserGallery(p);
       const onlyImages = (g?.files || []).filter((it) => IMAGE_RE.test(String(it?.name || "")));
 
-      // 🔥 เรียงใหม่สุดก่อนด้วยชื่อไฟล์ capture_YYYYMMDD_HHMMSS
+      //เรียงใหม่สุดก่อนด้วยชื่อไฟล์ capture_YYYYMMDD_HHMMSS
       const sorted = onlyImages
         .map((it) => ({ ...it, __ts: tsFromFilename(it?.name || it?.path || "") }))
         .sort((a, b) => b.__ts - a.__ts)
@@ -465,38 +313,19 @@ export default function CustomerDashboard() {
           <Button variant="outline" onClick={refresh} disabled={loading}>
             {loading ? (<><Loader size={16} className="mr-2" />Loading…</>) : ("Refresh")}
           </Button>
-          <Button onClick={logout}>Logout</Button>
         </div>
       </div>
-
+      
       <div className="w-full max-w-5xl px-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* PHOTOS (scrollable) */}
-        <Card className="md:col-span-2 order-2 md:order-1">
-          <CardHeader>
-            <CardTitle>Photos</CardTitle>
-            <CardDescription>
-              {phone ? `Phone: ${phone}` : "Loading…"} {summary.count ? `• Total: ${summary.count}` : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="space-y-3">
-                <div className="h-[15vh] text-sm text-gray-500">Loading gallery…</div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <Skeleton key={i} className="w-full aspect-square rounded-lg" />
-                  ))}
-                </div>
-              </div>
-            ) : error ? (
-              <div className="text-sm text-red-600">{error}</div>
-            ) : gallery.length === 0 ? (
-              <div className="text-sm text-gray-500">No photos</div>
-            ) : (
-              <GalleryScrollGrid gallery={gallery} heightClass="h-[50vh]" />
-            )}
-          </CardContent>
-        </Card>
+       {/* PHOTOS (scrollable + lightbox) */}
+          <GalleryLightboxCard
+            title="Photos"
+            description={
+              phone ? `Phone: ${phone} ${summary.count ? `• Total: ${summary.count}` : ""}` : "Loading…"
+            }
+            gallery={gallery}
+            heightClass="h-[50vh]"
+          />
 
         {/* SUMMARY + QR */}
         <Card className="order-1 md:order-2">

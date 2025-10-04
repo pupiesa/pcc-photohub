@@ -12,7 +12,6 @@ import ForgotPinDialog from "@/components/ForgotPinDialog";
 import PromotionSuccessCard from "@/components/PromotionSuccessCard";
 import CouponPaymentPanel from "@/components/CouponPaymentPanel";
 
-
 const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
 const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
 const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
@@ -25,10 +24,38 @@ const CAMERA_BASE = process.env.NEXT_PUBLIC_CAMERA_BASE || "";
 
 const RETRY_MS = 30000;
 const PROG_TICK = 100;
-const PROG_STEP = 100 / (RETRY_MS / PROG_TICK);
-const BASE_ORDER_AMOUNT = 50;   // ฐานราคาเดิม (ใช้คำนวณส่วนลดที่โชว์บนการ์ด)
-const EXPIRE_SECONDS = 120;     // หมดเวลา QR
-const AUTO_REDEEM_LEN = 8;      // รหัสคูปอง 8 ตัว
+const BASE_ORDER_AMOUNT = 50;
+const EXPIRE_SECONDS = 120;
+const AUTO_REDEEM_LEN = 8;
+
+// แปลง error จาก validate/redeem
+function explainPromoError(err, fallback = "คูปองไม่ถูกต้อง/หมดอายุ") {
+  try {
+    const code = (err?.payload?.code || err?.payload?.error || err?.message || "")
+      .toString()
+      .toUpperCase();
+
+    // ปรับตามโค้ดฝั่ง API ท
+    if (code.includes("NOT_FOUND"))        return "ไม่พบคูปองนี้ในระบบ";
+    if (code.includes("INACTIVE"))         return "คูปองนี้ถูกปิดการใช้งานแล้ว";
+    if (code.includes("EXPIRED"))          return "คูปองนี้หมดอายุแล้ว";
+    if (code.includes("LIMIT") && code.includes("REACHED")) return "คูปองถูกใช้ครบจำนวนสิทธิ์แล้ว";
+    if (code.includes("ALREADY") && code.includes("USED"))  return "คุณใช้คูปองนี้ไปแล้ว";
+    if (code.includes("MIN_ORDER"))        return "ยอดคำสั่งซื้อไม่ถึงขั้นต่ำสำหรับคูปองนี้";
+    if (code.includes("NOT_ELIGIBLE"))     return "คุณไม่มีสิทธิ์ใช้คูปองนี้";
+    if (code.includes("REDEEM") && code.includes("LOCKED")) return "คูปองกำลังถูกใช้งาน กรุณาลองใหม่";
+    if (code.includes("REQUEST_FAILED") || code.includes("NETWORK"))
+      return "เครือข่ายขัดข้อง กรุณาลองใหม่";
+
+    // กรณี Stripe หรือ /api/pay
+    if (/coupon/i.test(err?.message || "") && /used|expire|invalid/i.test(err.message))
+      return "คูปองไม่ถูกต้อง/หมดอายุ หรือถูกใช้ไปแล้ว";
+
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function SuccessTick() {
   return (
@@ -62,7 +89,7 @@ async function ping(base, path = "/api/health", timeout = 2500) {
 }
 
 export default function BoothPage() {
-  const [currentView, setCurrentView] = useState("start"); // "start" | "login" | "Coupon" | "photobooth"
+  const [currentView, setCurrentView] = useState("start");
   const [user, setUser] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -90,7 +117,7 @@ export default function BoothPage() {
   const [timeLeft, setTimeLeft] = useState(0);
   const countdownRef = useRef(null);
 
-  // Coupon UI (focus + lock 8 + auto-redeem)
+  // Coupon UI
   const [couponInput, setCouponInput] = useState("");
   const couponRef = useRef(null);
   const autoTimerRef = useRef(null);
@@ -106,9 +133,8 @@ export default function BoothPage() {
   // Auto logout
   const deadlineRef = useRef(0);
   const [secondsLeft, setSecondsLeft] = useState(null);
-  const INACTIVITY_MS = 120000;   // 2 นาที
 
-  // Functions
+  // helpers: toast
   const clearTimers = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
@@ -123,17 +149,14 @@ export default function BoothPage() {
     setNoticeVisible(true);
     setProgress(100);
     const duration = sticky ? RETRY_MS : ms;
-    const step = sticky ? PROG_STEP : 100 / (duration / PROG_TICK);
+    const step = sticky ? (100 / (RETRY_MS / PROG_TICK)) : (100 / (duration / PROG_TICK));
     progressTimerRef.current = setInterval(
       () => setProgress((p) => Math.max(0, p - step)),
       PROG_TICK
     );
     if (!sticky) {
       hideTimerRef.current = setTimeout(() => setNoticeVisible(false), duration);
-      removeTimerRef.current = setTimeout(() => {
-        setNotice(null);
-        clearTimers();
-      }, duration + 700);
+      removeTimerRef.current = setTimeout(() => { setNotice(null); clearTimers(); }, duration + 700);
     }
   };
   const clearNotice = () => {
@@ -141,14 +164,10 @@ export default function BoothPage() {
     setNoticeVisible(false);
     setTimeout(() => setNotice(null), 700);
   };
-
-  const mmss = (s) => {
-    const mm = String(Math.floor(s / 60)).padStart(2, "0");
-    const ss = String(s % 60).padStart(2, "0");
-    return `${mm}:${ss}`;
-  };
+  const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`;
 
   const resetIdle = useCallback(() => {
+    const INACTIVITY_MS = 120000;
     deadlineRef.current = Date.now() + INACTIVITY_MS;
     setSecondsLeft(Math.ceil(INACTIVITY_MS / 1000));
   }, []);
@@ -168,6 +187,7 @@ export default function BoothPage() {
 
   const handleStartClick = () => { setCurrentView("login"); resetPayUi(); };
   const handleBackToStart = () => { setCurrentView("start"); resetPayUi(); };
+
   const handleLogin = async ({ phone, pin }) => {
     setBusy(true);
     try {
@@ -185,13 +205,11 @@ export default function BoothPage() {
     } catch (e) {
       const nextWrong = wrongCount + 1;
       setWrongCount(nextWrong);
-      if (nextWrong >= 3) {
-        setForgotPhone(phone);
-        setForgotOpen(true);
-      }
+      if (nextWrong >= 3) { setForgotPhone(phone); setForgotOpen(true); }
       showNotice(`Login failed: ${e.message || "REQUEST_FAILED"}`, "warn", false, 5000);
     } finally { setBusy(false); }
   };
+
   const handleLogout = useCallback(() => {
     try {
       localStorage.removeItem("pcc_user_phone");
@@ -217,12 +235,11 @@ export default function BoothPage() {
             orderAmount: BASE_ORDER_AMOUNT,
           });
           await startPayment(filtered);
-        } catch {
-          showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);
+        } catch (e) {
+          const msg = explainPromoError(e);
+          showNotice(msg, "warn", false, 3000);
           setCouponInput("");
-          requestAnimationFrame(() => {
-            couponRef.current?.focus?.({ preventScroll: true });
-          });
+          requestAnimationFrame(() => couponRef.current?.focus?.({ preventScroll: true }));
           autoFiredRef.current = false;
         }
       }, 120);
@@ -232,89 +249,93 @@ export default function BoothPage() {
   };
 
   const startPayment = async (code) => {
-  if (!user?.phone) { showNotice("กรุณาเข้าสู่ระบบก่อน", "warn", false, 3000); return; }
+    if (!user?.phone) { showNotice("กรุณาเข้าสู่ระบบก่อน", "warn", false, 3000); return; }
 
-  setLoadingPay(true);
-  setQrUrl(""); setPiId(""); setPayStatus("");
-  try {
-    const couponCode = (typeof code === "string" ? code : "")?.trim();
+    setLoadingPay(true);
+    setQrUrl(""); setPiId(""); setPayStatus("");
+    try {
+      const couponCode = (typeof code === "string" ? code : "")?.trim();
 
-    const r = await fetch("/api/pay", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        promoCode: couponCode || null,
-        userNumber: user?.phone,
-        orderAmount: BASE_ORDER_AMOUNT,
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok || !data.ok) throw new Error(data.message || "PAY_CREATE_FAILED");
-
-    const amountTHB = Number(data.amountTHB);
-    const discountTHB = Math.max(0, BASE_ORDER_AMOUNT - (isNaN(amountTHB) ? BASE_ORDER_AMOUNT : amountTHB));
-    const usedCoupon = Boolean(couponCode);
-    const couponSucceeded = usedCoupon && discountTHB > 0;
-
-    if (couponSucceeded) {
-      setCouponInput("");                      
-      autoFiredRef.current = false;          
-      requestAnimationFrame(() => {
-        couponRef.current?.focus?.({ preventScroll: true });
+      const r = await fetch("/api/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promoCode: couponCode || null,
+          userNumber: user?.phone,
+          orderAmount: BASE_ORDER_AMOUNT,
+        }),
       });
+      const data = await r.json();
+      if (!r.ok || !data.ok) throw new Error(data.message || "PAY_CREATE_FAILED");
 
-      const isFree = amountTHB === 0;
-      setPromoCard({ show: true, amount: discountTHB, isFree });
-      setQrUrl(data.qr || "");
-      setPiId(data.paymentIntentId || "");
-      setPayStatus(data.amountTHB === 0 ? "succeeded" : "requires_action");
-      return;
+      const amountTHB = Number(data.amountTHB);
+      const discountTHB = Math.max(0, BASE_ORDER_AMOUNT - (isNaN(amountTHB) ? BASE_ORDER_AMOUNT : amountTHB));
+      const usedCoupon = Boolean(couponCode);
+      const couponSucceeded = usedCoupon && discountTHB > 0;
+
+      if (couponSucceeded) {
+        client.redeemPromo(couponCode, {
+          userNumber: user?.phone,
+          orderAmount: BASE_ORDER_AMOUNT,
+        }).catch(() => {});
+      }
+
+      if (couponSucceeded) {
+        setCouponInput("");
+        autoFiredRef.current = false;
+        requestAnimationFrame(() => couponRef.current?.focus?.({ preventScroll: true }));
+
+        const isFree = amountTHB === 0;
+        setPromoCard({ show: true, amount: discountTHB, isFree });
+        setQrUrl(data.qr || "");
+        setPiId(data.paymentIntentId || "");
+        setPayStatus(data.amountTHB === 0 ? "succeeded" : "requires_action");
+        return;
+      }
+
+      if (amountTHB === 0) {
+        setCouponInput("");
+        setCurrentView("photobooth");
+        resetPayUi();
+        return;
+      }
+
+      fetch(`${PRINT_BASE}/play/pay.wav`);
+      setQrUrl(data.qr);
+      setPiId(data.paymentIntentId);
+      setPayStatus("requires_action");
+      setShowPay(true);
+
+      setTimeLeft(EXPIRE_SECONDS);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      countdownRef.current = setInterval(() => {
+        setTimeLeft((t) => {
+          if (t <= 1) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+            expireSessionNow();
+            return 0;
+          }
+          return t - 1;
+        });
+      }, 1000);
+    } catch (e) {
+      console.error("Create pay failed:", e);
+      const couponCode = (typeof code === "string" ? code : "")?.trim();
+      if (couponCode && couponCode.length === AUTO_REDEEM_LEN) {
+        const msg = explainPromoError(e);
+        showNotice(msg, "warn", false, 3000);
+        setShowPay(false);
+        setQrUrl(""); setPiId(""); setPayStatus("");
+        setCouponInput("");
+        requestAnimationFrame(() => couponRef.current?.focus?.({ preventScroll: true }));
+        return;
+      }
+      backToLoginOnFail("สร้างการชำระเงินไม่สำเร็จ");
+    } finally {
+      setLoadingPay(false);
     }
-
-    if (amountTHB === 0) {
-      setCouponInput("");                      
-      setCurrentView("photobooth");
-      resetPayUi();
-      return;
-    }
-
-    fetch(`${PRINT_BASE}/play/pay.wav`);
-    setQrUrl(data.qr);
-    setPiId(data.paymentIntentId);
-    setPayStatus("requires_action");
-    setShowPay(true);
-
-    setTimeLeft(EXPIRE_SECONDS);
-    if (countdownRef.current) clearInterval(countdownRef.current);
-    countdownRef.current = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) {
-          clearInterval(countdownRef.current);
-          countdownRef.current = null;
-          expireSessionNow();
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
-  } catch (e) {
-    console.error("Create pay failed:", e);
-    const couponCode = (typeof code === "string" ? code : "")?.trim();
-    if (couponCode && couponCode.length === AUTO_REDEEM_LEN) {
-      showNotice("คูปองไม่ถูกต้อง/หมดอายุ", "warn", false, 1800);
-      setShowPay(false);
-      setQrUrl(""); setPiId(""); setPayStatus("");
-      setCouponInput("");                       
-      requestAnimationFrame(() => {
-        couponRef.current?.focus?.({ preventScroll: true });
-      });
-      return;
-    }
-    backToLoginOnFail("สร้างการชำระเงินไม่สำเร็จ");
-  } finally {
-    setLoadingPay(false);
-  }
-};
+  };
 
   const expireSessionNow = async () => {
     if (!piId) { backToLoginOnFail("หมดเวลา กรุณาลองใหม่"); return; }
@@ -336,30 +357,26 @@ export default function BoothPage() {
     }
   };
 
-  const renderCouponOrPayment = () => {
-    return (
-      <CouponPaymentPanel
-        showPay={showPay}
-
-        // Coupon mode
-        couponValue={couponInput}
-        onCouponChange={(v) => onCouponChange(v)}
-        onRedeem={() => startPayment(couponInput)}
-        onSkipNoCoupon={() => startPayment("")}
-        onLogout={handleLogout}
-        loading={loadingPay}
-        codeLength={AUTO_REDEEM_LEN}
-
-        // Payment mode
-        qrUrl={qrUrl}
-        payStatus={payStatus}
-        timeLeft={timeLeft}
-        expireSeconds={EXPIRE_SECONDS}
-        formatTime={mmss}
-        logoSrc={"/image/Thai_QR_Payment_Logo-01.jpg"} // โลโก้ Thai QR Payment
-      />
-    );
-  };
+  const renderCouponOrPayment = () => (
+    <CouponPaymentPanel
+      showPay={showPay}
+      // Coupon mode
+      couponValue={couponInput}
+      onCouponChange={(v) => onCouponChange(v)}
+      onRedeem={() => startPayment(couponInput)}
+      onSkipNoCoupon={() => startPayment("")}
+      onLogout={handleLogout}
+      loading={loadingPay}
+      codeLength={AUTO_REDEEM_LEN}
+      // Payment mode
+      qrUrl={qrUrl}
+      payStatus={payStatus}
+      timeLeft={timeLeft}
+      expireSeconds={EXPIRE_SECONDS}
+      formatTime={mmss}
+      logoSrc={"/image/Thai_QR_Payment_Logo-01.jpg"}
+    />
+  );
 
   const colorBar =
     notice?.variant === "success" ? "from-emerald-400 to-lime-400"
@@ -380,16 +397,14 @@ export default function BoothPage() {
             onForgotPin={(phone) => { setForgotPhone(phone); setForgotOpen(true); }}
           />
         );
-      case "Coupon":
-        return renderCouponOrPayment();
+      case "Coupon":  return renderCouponOrPayment();
       case "photobooth":
         return (
           <div className="flex flex-col items-center">
             <PhotoboothInterface user={user} onLogout={handleLogout} />
           </div>
         );
-      default:
-        return <StartCard onStartClick={handleStartClick} />;
+      default:         return <StartCard onStartClick={handleStartClick} />;
     }
   };
 
@@ -406,14 +421,10 @@ export default function BoothPage() {
       const okCam   = await ping(CAMERA_BASE, "/", 2500); if (!okCam) bad.push("CAMERA");
       if (!mounted) return;
       if (bad.length > 0) {
-        setIsOffline(true);
-        setDownList(bad);
+        setIsOffline(true); setDownList(bad);
         showNotice(`Cannot reach: ${bad.join(", ")}`, "warn", true);
       } else {
-        if (isOffline) {
-          setIsOffline(false); setDownList([]); clearNotice();
-          showNotice("Back online", "success", false, 3000);
-        }
+        if (isOffline) { setIsOffline(false); setDownList([]); clearNotice(); showNotice("Back online", "success", false, 3000); }
       }
     };
     checkApis();
@@ -422,18 +433,14 @@ export default function BoothPage() {
   }, [MONGO_BASE, NC_BASE, CAMERA_BASE, isOffline]);
 
   useEffect(() => {
-    // ทำงานเฉพาะหน้า start, login, และ Coupon (เมื่อไม่ showPay และไม่ promoCard.show)
     if (!["login", "Coupon"].includes(currentView) || showPay || promoCard.show) {
       setSecondsLeft(null);
       return;
     }
-
     const events = ["pointerdown", "keydown", "mousemove", "wheel", "touchstart", "scroll"];
     const handler = () => resetIdle();
-
     events.forEach((ev) => window.addEventListener(ev, handler, { passive: true }));
     resetIdle();
-
     const tick = setInterval(() => {
       const ms = Math.max(0, deadlineRef.current - Date.now());
       const s = Math.max(0, Math.ceil(ms / 1000));
@@ -444,7 +451,6 @@ export default function BoothPage() {
         handleLogout();
       }
     }, 1000);
-
     return () => {
       clearInterval(tick);
       events.forEach((ev) => window.removeEventListener(ev, handler));
@@ -497,136 +503,126 @@ export default function BoothPage() {
     return () => { stop = true; };
   }, [piId]);
 
- return (
-  <WarpBackground className="h-screen flex flex-col" {...WARP_CONFIG}>
-    {currentView !== "photobooth" && (
-      <div className="text-center pt-8">
-        <GradientText
-          className="text-4xl font-bold text-center"
-          text="Pcc-Photohub"
-          neon
-          gradient="linear-gradient(90deg, #00ff00 0%, #00ffff 25%, #ff00ff 50%, #00ffff 75%, #00ff00 100%)"
-        />
-      </div>
-    )}
-
-    {/* Toast */}
-    {notice && (
-      <div className={`fixed top-5 right-5 z-50 transition-opacity duration-700 ${noticeVisible ? "opacity-100" : "opacity-0"}`}>
-        <div
-          className={`min-w-[260px] max-w-[360px] rounded-xl shadow-xl border backdrop-blur px-4 py-3
-            ${cardColor} text-sm font-medium tracking-tight text-gray-900 dark:text-gray-100`}
-        >
-          <div
-            className={`h-1 w-full rounded-full bg-gradient-to-r ${colorBar} mb-2`}
-            style={{ width: `${progress}%`, transition: `width ${PROG_TICK}ms linear` }}
+  return (
+    <WarpBackground className="h-screen flex flex-col" {...WARP_CONFIG}>
+      {currentView !== "photobooth" && (
+        <div className="text-center pt-8">
+          <GradientText
+            className="text-4xl font-bold text-center"
+            text="Pcc-Photohub"
+            neon
+            gradient="linear-gradient(90deg, #00ff00 0%, #00ffff 25%, #ff00ff 50%, #00ffff 75%, #00ff00 100%)"
           />
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {notice.variant === "success" && (
-                <span className="text-emerald-600 dark:text-emerald-400"><SuccessTick /></span>
+        </div>
+      )}
+
+      {/* Toast */}
+      {notice && (
+        <div className={`fixed top-5 right-5 z-50 transition-opacity duration-700 ${noticeVisible ? "opacity-100" : "opacity-0"}`}>
+          <div
+            className={`min-w=[260px] max-w-[360px] rounded-xl shadow-xl border backdrop-blur px-4 py-3
+            ${notice?.variant === "success" ? "bg-white/85 dark:bg-gray-900/85 border-emerald-300/60" :
+              notice?.variant === "error" ? "bg-white/85 dark:bg-gray-900/85 border-rose-300/60" :
+              "bg-white/85 dark:bg-gray-900/85 border-amber-300/60"} text-sm font-medium tracking-tight`}
+          >
+            <div
+              className={`h-1 w-full rounded-full bg-gradient-to-r ${
+                notice?.variant === "success" ? "from-emerald-400 to-lime-400" :
+                notice?.variant === "error"   ? "from-rose-400 to-red-500" :
+                                                "from-amber-400 to-yellow-400"
+              } mb-2`}
+              style={{ width: `${progress}%`, transition: `width ${PROG_TICK}ms linear` }}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {notice.variant === "success" && (
+                  <span className="text-emerald-600 dark:text-emerald-400"><SuccessTick /></span>
+                )}
+                <span>{notice.text}</span>
+              </div>
+              {notice.variant === "warn" && (
+                <button
+                  onClick={retryNow}
+                  className="ml-2 px-2 py-1 text-xs rounded-md border border-amber-400/60 bg-amber-50/60 dark:bg-amber-900/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition"
+                >
+                  Retry
+                </button>
               )}
-              <span>{notice.text}</span>
             </div>
-            {notice.variant === "warn" && (
-              <button
-                onClick={retryNow}
-                className="ml-2 px-2 py-1 text-xs rounded-md border border-amber-400/60 bg-amber-50/60 dark:bg-amber-900/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 transition"
-              >
-                Retry
-              </button>
-            )}
           </div>
-          {notice.sticky && downList.length > 0 && (
-            <div className="mt-1 text-xs opacity-80">{downList.join(" • ")}</div>
-          )}
+          <style jsx global>{`
+            .ckmk-circle, .ckmk-check { stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+            .ckmk-circle { stroke-dasharray: 150; stroke-dashoffset: 150; animation: ckmk-draw 0.55s ease-out forwards; opacity: .9; }
+            .ckmk-check  { stroke-dasharray: 40;  stroke-dashoffset: 40;  animation: ckmk-draw 0.35s 0.35s ease-out forwards; }
+            @keyframes ckmk-draw { to { stroke-dashoffset: 0; } }
+          `}</style>
         </div>
+      )}
 
-        <style jsx global>{`
-          .ckmk-circle, .ckmk-check {
-            stroke: currentColor;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-          }
-          .ckmk-circle {
-            stroke-dasharray: 150;
-            stroke-dashoffset: 150;
-            animation: ckmk-draw 0.55s ease-out forwards; opacity: .9;
-          }
-          .ckmk-check {
-            stroke-dasharray: 40;
-            stroke-dashoffset: 40;
-            animation: ckmk-draw 0.35s 0.35s ease-out forwards;
-          }
-          @keyframes ckmk-draw { to { stroke-dashoffset: 0; } }
-        `}</style>
-      </div>
-    )}
-
-    {/* Idle countdown banner */}
-    {typeof secondsLeft === "number" && secondsLeft > 0 && secondsLeft <= 20 && (
-      <div className="fixed bottom-4 inset-x-0 flex justify-center pointer-events-none">
-        <div className="pointer-events-auto px-4 py-2 rounded-full bg-black/70 text-red-500 text-sm shadow-lg backdrop-blur">
-          ไม่มีการใช้งาน — จะออกจากระบบอัตโนมัติใน <span className="font-bold">{secondsLeft}</span>
+      {/* Idle countdown banner */}
+      {typeof secondsLeft === "number" && secondsLeft > 0 && secondsLeft <= 20 && (
+        <div className="fixed bottom-4 inset-x-0 flex justify-center pointer-events-none">
+          <div className="pointer-events-auto px-4 py-2 rounded-full bg-black/70 text-red-500 text-sm shadow-lg backdrop-blur">
+            ไม่มีการใช้งาน — จะออกจากระบบอัตโนมัติใน <span className="font-bold">{secondsLeft}</span>
+          </div>
         </div>
-      </div>
-    )}
+      )}
 
-    {/* การ์ดโปรโมชัน */}
-    {promoCard.show && (
-      <PromotionSuccessCard
-        amount={promoCard.amount}
-        isFree={promoCard.isFree}
-        seconds={2}
-        playSoundUrl={`${PRINT_BASE}/play/couponuse.wav`}
-        onDone={() => {
-          setPromoCard((p) => ({ ...p, show: false }));
-          if (promoCard.isFree) {
-            showNotice("🔖 Free Session", "success", false, 2600);
-            setCurrentView("photobooth");
-            resetPayUi();
-          } else {
-            if (piId && payStatus === "requires_action") {
-              setShowPay(true);
-              if (!countdownRef.current) {
-                setTimeLeft(EXPIRE_SECONDS);
-                countdownRef.current = setInterval(() => {
-                  setTimeLeft((t) => {
-                    if (t <= 1) {
-                      clearInterval(countdownRef.current);
-                      countdownRef.current = null;
-                      expireSessionNow();
-                      return 0;
-                    }
-                    return t - 1;
-                  });
-                }, 1000);
+      {/* การ์ดโปรโมชัน */}
+      {promoCard.show && (
+        <PromotionSuccessCard
+          amount={promoCard.amount}
+          isFree={promoCard.isFree}
+          seconds={2}
+          playSoundUrl={`${PRINT_BASE}/play/couponuse.wav`}
+          onDone={() => {
+            setPromoCard((p) => ({ ...p, show: false }));
+            if (promoCard.isFree) {
+              showNotice("🔖 Free Session", "success", false, 2600);
+              setCurrentView("photobooth");
+              resetPayUi();
+            } else {
+              if (piId && payStatus === "requires_action") {
+                setShowPay(true);
+                if (!countdownRef.current) {
+                  setTimeLeft(EXPIRE_SECONDS);
+                  countdownRef.current = setInterval(() => {
+                    setTimeLeft((t) => {
+                      if (t <= 1) {
+                        clearInterval(countdownRef.current);
+                        countdownRef.current = null;
+                        expireSessionNow();
+                        return 0;
+                      }
+                      return t - 1;
+                    });
+                  }, 1000);
+                }
               }
             }
-          }
+          }}
+        />
+      )}
+
+      {/* โหมดถ่ายรูป */}
+      {currentView === "photobooth" ? (
+        <div className="fixed inset-0 z-[50]">
+          <PhotoboothInterface user={user} onLogout={handleLogout} />
+        </div>
+      ) : (
+        <div className="flex-1 flex justify-center mt-10 px-6">{renderCurrentView()}</div>
+      )}
+
+      <ForgotPinDialog
+        open={forgotOpen}
+        onOpenChange={setForgotOpen}
+        phone={forgotPhone}
+        afterReset={() => {
+          setCurrentView("login");
+          setWrongCount(0);
+          showNotice("โปรดใช้ PIN ใหม่ในการเข้าสู่ระบบ", "success", false, 3000);
         }}
       />
-    )}
-
-    {/* โหมดถ่ายรูป */}
-    {currentView === "photobooth" ? (
-      <div className="fixed inset-0 z-[50]">
-        <PhotoboothInterface user={user} onLogout={handleLogout} />
-      </div>
-    ) : (
-      <div className="flex-1 flex justify-center mt-10 px-6">{renderCurrentView()}</div>
-    )}
-
-    <ForgotPinDialog
-      open={forgotOpen}
-      onOpenChange={setForgotOpen}
-      phone={forgotPhone}
-      afterReset={() => {
-        setCurrentView("login");
-        setWrongCount(0);
-        showNotice("โปรดใช้ PIN ใหม่ในการเข้าสู่ระบบ", "success", false, 3000);
-      }}
-    />
-  </WarpBackground>
-);
+    </WarpBackground>
+  );
 }

@@ -1,194 +1,146 @@
-// app/about/page.js
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
-
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select"
-
-const TEXTS = {
-  th: {
-    title: "📸 Photobooth",
-    subtitle: "ระบบถ่ายภาพอัตโนมัติที่ใช้งานง่าย สนุก และแชร์รูปได้ทันที",
-    sections: {
-      purpose: {
-        h: "🎯 จุดประสงค์",
-        p: "Photobooth ถูกสร้างขึ้นเพื่อให้ทุกคนสามารถเก็บความทรงจำในรูปแบบดิจิทัลได้อย่างสะดวก รองรับงานอีเวนต์ งานแต่ง ปาร์ตี้ หรือสตูดิโอขนาดเล็ก",
-      },
-      features: {
-        h: "⚡ คุณสมบัติเด่น",
-        items: [
-          "ถ่ายรูปอัตโนมัติพร้อมนับถอยหลังก่อนถ่าย",
-          "รองรับกล้อง DSLR/Mirrorless",
-          "แชร์รูปผ่าน QR Code หรืออีเมล",
-          "จัดเก็บไฟล์บน Nextcloud อย่างปลอดภัย",
-        ],
-      },
-      tech: {
-        h: "🌐 เทคโนโลยีที่ใช้",
-        p: "พัฒนาด้วย Next.js + Node.js เชื่อมต่อ MongoDB และ Nextcloud ส่วน UI ใช้ shadcn/ui เพื่อความทันสมัยและใช้งานง่าย",
-      },
-      team: {
-        h: "👥 ทีมพัฒนา",
-        p: "ทีม คนบ้า Club ที่หลงใหลด้านการถ่ายภาพและเทคโนโลยี",
-      },
-    },
-    back: "กลับสู่หน้าหลัก",
-    gotoDashboard: "ไปหน้า Dashboard",
-    langLabel: "ภาษา",
-    langTH: "ไทย",
-    langEN: "อังกฤษ",
+import Image from "next/image";
+import dynamic from "next/dynamic";
+import { useEffect } from "react";
+const BGBeams = dynamic(
+  async () => {
+    const mod = await import("@/components/ui/shadcn-io/background-beams-with-collision");
+    return "default" in mod ? mod.default : mod.BackgroundBeamsWithCollision;
   },
-  en: {
-    title: "📸 Photobooth",
-    subtitle:
-      "An easy, fun, and instant photo booth that lets guests share photos right away.",
-    sections: {
-      purpose: {
-        h: "🎯 Purpose",
-        p: "Photobooth is built to capture memories effortlessly. Perfect for events, weddings, parties, or compact studios.",
-      },
-      features: {
-        h: "⚡ Key Features",
-        items: [
-          "Auto capture with countdown",
-          "DSLR/Mirrorless camera support",
-          "Share via QR Code or Email",
-          "Secure storage on Nextcloud",
-        ],
-      },
-      tech: {
-        h: "🌐 Tech Stack",
-        p: "Built with Next.js + Node.js, connected to MongoDB and Nextcloud. UI is powered by shadcn/ui for a clean, modern experience.",
-      },
-      team: {
-        h: "👥 Team",
-        p: "ทีม คนบ้า Club — passionate about photography and technology.",
-      },
-    },
-    back: "Back to Home",
-    gotoDashboard: "Go to Dashboard",
-    langLabel: "Language",
-    langTH: "Thai",
-    langEN: "English",
+  { ssr: false }
+);
+
+const PEOPLE = [
+  {
+    side: "left",
+    name: "Dusakorn Tubsang",
+    title: "Founder & Lead Developer",
+    desc:
+      "Fontend Stripe QR-PromptPay",
+    image: "/image/about/DUS.jpg"
   },
-}
+  {
+    side: "right",
+    name: "Chanapongpans Submee",
+    title: "Co-founder & Operations",
+    desc:
+      "Imagecloud DataBase API Backend",
+    image: "/image/about/CHP-7.jpg"
+  },
+  {
+    side: "left",
+    name: "Sahakiat Kanchanarat",
+    title: "CTO & Infrastructure",
+    desc:
+      "SystemHardware  Micro-APIs  3D-printer",
+    image: "/image/about/CHP-42.jpg"
+  },
+  {
+    side: "right",
+    name: "Surachat Khongsong",
+    title: "Design & Support",
+    desc:
+      "UI Logo security guard",
+    image: "/image/about/IMG.jpg"
+  }
+];
 
 export default function AboutPage() {
-  const [lang, setLang] = useState("th")
+  const leftCol = PEOPLE.filter((p) => p.side === "left");
+  const rightCol = PEOPLE.filter((p) => p.side === "right");
 
   useEffect(() => {
-    const saved = localStorage.getItem("about_lang") || "th"
-    setLang(saved)
-  }, [])
-  useEffect(() => {
-    localStorage.setItem("about_lang", lang)
-  }, [lang])
-
-  const t = useMemo(() => TEXTS[lang], [lang])
+    window.dispatchEvent(new CustomEvent("navbar:set", {
+      detail: {
+        // ตั้งค่าเฉพาะหน้านี้
+        enableAutoLogout: true,
+        autoLogoutMs: 2 * 60 * 1000,
+        autoLogoutWarnAt: 20,
+        autoLogoutPlayUrl: "http://127.0.0.1:5000/play/thankyou.wav",
+        showLogout: true,
+        logoutRedirectPath: "/booth",
+        logoutClearKeys: ["pcc_user_phone", "pcc_user_pin"],
+      }
+    }));
+    return () => {
+      window.dispatchEvent(new CustomEvent("navbar:reset"));
+    };
+  }, []);
 
   return (
-    <div className="container mx-auto max-w-3xl py-10">
-      <Card className="shadow-lg rounded-2xl">
-        <CardHeader className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-3xl font-bold">{t.title}</CardTitle>
-              <CardDescription>{t.subtitle}</CardDescription>
-            </div>
+    <div className="relative flex flex-col min-h-[88.5vh] min-w-full bg-black text-zinc-100 overflow-hidden">
+      {/* BG */}
+      <div className="absolute inset-0 z-0">
+        <BGBeams className="absolute inset-0" />
+      </div>
 
-            {/* Language Switcher */}
-            <div className="min-w-[170px]">
-              <Select value={lang} onValueChange={(v) => setLang(v)}>
-                <SelectTrigger aria-label={t.langLabel}>
-                  <SelectValue placeholder={t.langLabel} />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="th">{t.langTH}</SelectItem>
-                  <SelectItem value="en">{t.langEN}</SelectItem>
-                </SelectContent>
-              </Select>
+      {/* เนื้อหา */}
+      <main className="relative z-10 flex flex-col flex-1 items-center justify-start pt-10 pb-12">
+        <Image
+          src="/image/saturuLogo.jpg"
+          alt="Logo"
+          width={120}
+          height={120}
+          className="rounded-full ring-2 ring-white/20 shadow-2xl shadow-blue-500"
+          priority
+        />
+        <h1 className="mt-4 text-xl md:text-2xl font-semibold">About Us</h1>
+        <div className="text-sm text-zinc-400 text-center max-w-[70ch] mt-1 space-y-1">
+          <p><strong>ProjecPccPhotoHub</strong></p>
+          <p>Present is a project of 3rd year university student</p>
+          <p>King Mongkut's Institute of Technology Ladkrabang Prince of Chumphon Campus</p>
+        </div>
+
+
+        {/* section ขยายเต็ม + จัดให้อยู่กลางแนวตั้ง */}
+        <section className="flex-1 flex items-center w-full">
+          <div className="mx-auto max-w-6xl w-full px-4 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+            <div className="flex flex-col gap-6 md:gap-8 ">
+              {leftCol.map((p, idx) => (
+                <PersonCard key={`l-${idx}`} person={p} />
+              ))}
+            </div>
+            <div className="flex flex-col gap-6 md:gap-8">
+              {rightCol.map((p, idx) => (
+                <PersonCard key={`r-${idx}`} person={p} />
+              ))}
             </div>
           </div>
-        </CardHeader>
-
-        <Separator />
-
-        <CardContent className="space-y-6 pt-6">
-          <ScrollArea className="h-[55vh] pr-4">
-            <div className="space-y-6">
-              <Section
-                title={t.sections.purpose.h}
-                body={
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {t.sections.purpose.p}
-                  </p>
-                }
-              />
-              <Section
-                title={t.sections.features.h}
-                body={
-                  <ul className="list-disc list-inside text-sm text-muted-foreground space-y-2">
-                    {t.sections.features.items.map((li, i) => (
-                      <li key={i}>{li}</li>
-                    ))}
-                  </ul>
-                }
-              />
-              <Section
-                title={t.sections.tech.h}
-                body={
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {t.sections.tech.p}
-                  </p>
-                }
-              />
-              <Section
-                title={t.sections.team.h}
-                body={
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {t.sections.team.p}
-                  </p>
-                }
-              />
-            </div>
-          </ScrollArea>
-
-          <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-            <Button asChild variant="secondary">
-              <Link href="/">{t.back}</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/dashboard">{t.gotoDashboard}</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+        </section>
+      </main>
     </div>
-  )
+  );
 }
 
-function Section({ title, body }) {
+function PersonCard({ person }) {
+  const { name, title, desc, image } = person || {};
   return (
-    <section>
-      <h2 className="text-xl font-semibold">{title}</h2>
-      <div className="mt-2">{body}</div>
-    </section>
-  )
+    <GlassCard>
+      <div className={image ? "flex items-start gap-4" : ""}>
+        {image && (
+          <Image
+            src={image}
+            alt={name}
+            width={96}
+            height={96}
+            className="size-24 rounded-xl object-cover ring-1 ring-white/15 "
+          />
+        )}
+        <div>
+          <h2 className="text-base md:text-lg font-medium">{name}</h2>
+          <p className="text-xs md:text-sm text-zinc-300">{title}</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">{desc}</p>
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+function GlassCard({ children }) {
+  return (
+    <div className="rounded-2xl p-5 md:p-6 bg-white/[0.06] backdrop-blur-md ring-1 ring-white/10 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.65)]">
+      {children}
+    </div>
+  );
 }

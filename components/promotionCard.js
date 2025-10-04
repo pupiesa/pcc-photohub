@@ -4,48 +4,38 @@ import { Input } from "./ui/input";
 
 const CODE_LEN = 8;
 
-const PromotionCard = ({ details, onRedeem }) => {
+const PromotionCard = ({ onRedeem }) => {
   const [code, setCode] = useState("");
-  const [autoing, setAutoing] = useState(false);
-  const lastAutoCodeRef = useRef("");
+  const [checking, setChecking] = useState(false);
+  const lastFiredRef = useRef("");
 
-  const label =
-    details?.type === "percent"
-      ? `${details.value}% off`
-      : details?.type === "amount" || details?.type === "fixed"
-      ? `฿${details.value} off`
-      : "";
+  const normalize = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LEN);
 
-  const fmt = (s) => (s ? new Date(s).toLocaleDateString() : "");
-  const normalize = (s) => String(s || "").toUpperCase().replace(/\s+/g, "");
-
-  // Auto redeem เมื่อครบ 8 ตัว (debounce 300ms กันเด้งซ้ำ)
   useEffect(() => {
     const n = normalize(code);
-    if (n.length === CODE_LEN && n !== lastAutoCodeRef.current) {
-      setAutoing(true);
-      const id = setTimeout(async () => {
-        try {
-          lastAutoCodeRef.current = n;
-          await onRedeem?.(n);
-        } finally {
-          setAutoing(false);
-        }
-      }, 300);
-      return () => clearTimeout(id);
-    }
+    if (n.length !== CODE_LEN || n === lastFiredRef.current) return;
+    const t = setTimeout(async () => {
+      lastFiredRef.current = n;
+      setChecking(true);
+      try {
+        await onRedeem?.(n);
+      } finally {
+        setChecking(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
   }, [code, onRedeem]);
 
   const handleKeyDown = async (e) => {
     if (e.key === "Enter") {
       const n = normalize(code);
       if (n.length === CODE_LEN) {
-        setAutoing(true);
+        lastFiredRef.current = n;
+        setChecking(true);
         try {
-          lastAutoCodeRef.current = n;
           await onRedeem?.(n);
         } finally {
-          setAutoing(false);
+          setChecking(false);
         }
       }
     }
@@ -62,22 +52,21 @@ const PromotionCard = ({ details, onRedeem }) => {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Coupon`}
+            placeholder="Coupon"
             maxLength={CODE_LEN}
           />
         </h3>
 
-
         <button
           onClick={() => onRedeem?.(ncode)}
-          disabled={ncode.length !== CODE_LEN || autoing}
+          disabled={ncode.length !== CODE_LEN || checking}
           className={`mt-3 w-full py-2 px-4 rounded-md text-white transition
-            ${ncode.length === CODE_LEN && !autoing
+            ${ncode.length === CODE_LEN && !checking
               ? "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               : "bg-gray-400 cursor-not-allowed"}`}
           title={ncode.length !== CODE_LEN ? `ใส่ให้ครบ ${CODE_LEN} ตัวก่อน` : "Redeem Now"}
         >
-          {autoing ? "Checking…" : "Redeem Now"}
+          {checking ? "Checking…" : "Redeem Now"}
         </button>
       </div>
     </div>

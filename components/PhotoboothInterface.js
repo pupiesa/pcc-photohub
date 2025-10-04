@@ -5,17 +5,24 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { client } from "@/lib/photoboothClient";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Loader } from "@/components/ui/shadcn-io/ai/loader";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { toast } from "sonner";
 
 const TEMPLATE_KEY = "kmitl2025";
-const CAMERA_BASE = (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
+const CAMERA_BASE =
+  (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
 
-const PRINT_HOST = (process.env.PRINT_API_HOST || "127.0.0.1");
-const PRINT_PORT = (process.env.PRINT_API_PORT || "5000")
+const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
+const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
 const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
 
 export default function PhotoboothInterface({ user, onLogout }) {
@@ -24,6 +31,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   const [countdown, setCountdown] = useState(null);
   const [shooting, setShooting] = useState(false);
+  const [preMessage, setPreMessage] = useState(false); // ✅ Overlay ก่อนนับ
   const [photosTaken, setPhotosTaken] = useState(0);
   const [capturedImage, setCapturedImage] = useState(null);
   const [capturedServerPath, setCapturedServerPath] = useState(null);
@@ -31,7 +39,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const [busy, setBusy] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
 
-  // ดีเลย์ปุ่ม 5 วิ หลังถ่ายเสร็จ
+  // ดีเลย์ปุ่ม 2.5 วิ หลังถ่ายเสร็จ
   const [buttonsReady, setButtonsReady] = useState(false);
   useEffect(() => {
     if (capturedImage) {
@@ -76,38 +84,48 @@ export default function PhotoboothInterface({ user, onLogout }) {
     };
   }, [pathname]);
 
+  // เริ่มถ่าย: โชว์ overlay 4 วินาที → ค่อยเริ่มนับ 3-2-1
   const startPhotoshoot = () => {
     setShooting(true);
-    fetch(`${PRINT_BASE}/play/321.wav`);
-    let count = 3;
-    setCountdown(count);
-    const timer = setInterval(() => {
-      count--;
-      if (count > 0) setCountdown(count);
-      else{
-        setCountdown("📸");
-        setTimeout(() => {
-          setCountdown(null);
-          handleCapture();
-        }, 500);
-        clearInterval(timer);
-      }
-    }, 1000);
+    setPreMessage(true);
+
+    setTimeout(() => {
+      setPreMessage(false);
+      fetch(`${PRINT_BASE}/play/321.wav`).catch(() => {});
+      let count = 3;
+      setCountdown(count);
+      const timer = setInterval(() => {
+        count--;
+        if (count > 0) setCountdown(count);
+        else {
+          setCountdown("📸");
+          setTimeout(() => {
+            setCountdown(null);
+            handleCapture();
+          }, 500);
+          clearInterval(timer);
+        }
+      }, 1000);
+    }, 2800); // เตือน 2.8 วินาที
   };
 
   const handleCapture = async () => {
     try {
       if (!CAMERA_BASE) throw new Error("CAMERA_BASE not set");
-      fetch(`${PRINT_BASE}/play/che.wav`);
-      const res = await fetch(`${CAMERA_BASE}/capture`, { method: "POST", headers: { "Content-Type": "application/json" } });
-      if (!res.ok) throw new Error((await res.text()) || `Capture failed: ${res.status}`);
+      fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {});
+      const res = await fetch(`${CAMERA_BASE}/capture`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok)
+        throw new Error((await res.text()) || `Capture failed: ${res.status}`);
       const data = await res.json();
       const url = data?.url;
       if (!url) throw new Error("No image url returned");
       setCapturedImage(`${CAMERA_BASE}${url}?ts=${Date.now()}`);
       setCapturedServerPath(data?.serverPath || null);
     } catch (err) {
-      toast.error("ถ่ายภาพไม่สำเร็จ");
+      toast.error("การเชื่อมต่อผิดพลาด ถ่ายภาพไม่สำเร็จ");
     } finally {
       setShooting(false);
     }
@@ -118,12 +136,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
     if (!number || !paths.length) return;
 
     const remotes = [];
-    const up1 = await client.uploadAndShare({ folderName: number, filePath: paths[0] });
+    const up1 = await client.uploadAndShare({
+      folderName: number,
+      filePath: paths[0],
+    });
     if (up1?.share?.url) await client.setNextcloudLink(number, up1.share.url);
     if (up1?.uploaded?.remotePath) remotes.push(up1.uploaded.remotePath);
 
     for (let i = 1; i < paths.length; i++) {
-      const r = await client.uploadOnly({ folderName: number, filePath: paths[i] });
+      const r = await client.uploadOnly({
+        folderName: number,
+        filePath: paths[i],
+      });
       if (r?.uploaded?.remotePath) remotes.push(r.uploaded.remotePath);
     }
     if (remotes.length) await client.appendFileAddress(number, remotes);
@@ -139,7 +163,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const handleConfirmCapture = async () => {
     try {
       setBusy(true);
-      const nextPaths = capturedServerPath ? [...sessionPaths, capturedServerPath] : [...sessionPaths];
+      const nextPaths = capturedServerPath
+        ? [...sessionPaths, capturedServerPath]
+        : [...sessionPaths];
       const nextCount = photosTaken + 1;
 
       setCapturedImage(null);
@@ -153,7 +179,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
         await stopCamera().catch(() => {});
         await uploadBatchAndGo(nextPaths);
 
-        // เรียกสั่งพิมพ์
+        // สั่งพิมพ์
         try {
           const apiRes = await fetch(`${PRINT_BASE}/print`, {
             method: "POST",
@@ -164,7 +190,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
             }),
           });
           if (apiRes.ok) {
-            fetch(`${PRINT_BASE}/play/print.wav`);
+            fetch(`${PRINT_BASE}/play/print.wav`).catch(() => {});
           } else {
             console.error("Print API call failed:", await apiRes.text());
           }
@@ -175,7 +201,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
       }
 
       if (CAMERA_BASE) {
-        const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => null);
+        const r = await fetch(`${CAMERA_BASE}/confirm`, {
+          method: "POST",
+        }).catch(() => null);
         let nextLive = `${CAMERA_BASE}/video_feed?ts=${Date.now()}`;
         if (r && r.ok) {
           const data = await r.json().catch(() => ({}));
@@ -198,7 +226,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
     setLiveLoading(true);
   };
 
-  const hideUi = shooting && !capturedImage; // กำลังนับ/ลั่น และยังไม่แสดงรูป
+  // ซ่อน UI ตอนกำลังนับ/ลั่นชัตเตอร์
+  const hideUi = shooting && !capturedImage;
 
   return (
     <div className="fixed inset-0 z-20 bg-black">
@@ -235,16 +264,140 @@ export default function PhotoboothInterface({ user, onLogout }) {
         )}
       </div>
 
-      {/* นับถอยหลังกึ่งกลางจอ */}
+      {/* ==========  Overlay ชี้ตำแหน่งกล้อง  ========== */}
+      {preMessage && !capturedImage && (
+        <div className="absolute inset-0 z-30 overflow-hidden flex items-center justify-center">
+          {/* พื้นหลังมินิมอล + vignette เบา ๆ */}
+          <div className="absolute inset-0 bg-neutral-950/85" />
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(60% 50% at 50% 40%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%)",
+            }}
+          />
+
+          {/* เนื้อหา */}
+          <div className="relative z-10 text-center px-6 font-sans tracking-tight">
+            {/* หัวข้อ  */}
+            <h1
+              className="mx-auto font-semibold text-white animate-zoomIn"
+              style={{ fontSize: "clamp(28px, 6.6vw, 64px)", lineHeight: 1.1 }}
+            >
+              กรุณามองกล้องด้านบน
+            </h1>
+
+            {/* บรรทัดรอง — สีขาวโปร่ง */}
+            <p
+              className="mt-3 mx-auto text-white/80 animate-fadeInSlow"
+              style={{ fontSize: "clamp(14px, 2.2vw, 20px)" }}
+            >
+              นิ่งไว้สักครู่ เพื่อภาพที่คมชัดและเป็นธรรมชาติ
+            </p>
+
+           {/* ลูกศร SVG */}
+          <div className="mt-8 flex justify-center animate-bounceArrow">
+            <svg
+              width="108"
+              height="156"
+              viewBox="0 0 108 156"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <defs>
+                {/* เส้นไล่สีบนก้าน แอนิเมชันเลื่อนขึ้น */}
+                <linearGradient id="arrowStroke" x1="0" y1="156" x2="0" y2="0" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%"  stopColor="rgba(255,255,255,0.85)"/>
+                  <stop offset="55%" stopColor="rgba(255,255,255,1)"/>
+                  <stop offset="100%" stopColor="rgba(255,255,255,0.85)"/>
+                  <animateTransform
+                    attributeName="gradientTransform"
+                    type="translate"
+                    from="0 0" to="0 -24"
+                    dur="2.2s"
+                    repeatCount="indefinite"
+                  />
+                </linearGradient>
+
+                {/* glow รอบลูกศร */}
+                <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+
+                {/* ไฮไลต์บาง ๆ บนขอบ */}
+                <linearGradient id="edgeHighlight" x1="0" y1="156" x2="0" y2="0">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.12)"/>
+                  <stop offset="100%" stopColor="rgba(255,255,255,0.28)"/>
+                </linearGradient>
+              </defs>
+
+              {/* ก้านลูกศร */}
+              <path
+                d="M54 140 L54 44"
+                stroke="url(#arrowStroke)"
+                strokeWidth="10"
+                strokeLinecap="round"
+                filter="url(#softGlow)"
+              />
+
+              {/* หัวลูกศร */}
+              <path
+                d="M54 18 L31 50 L77 50 Z"
+                fill="white"
+                filter="url(#softGlow)"
+              />
+
+              {/* ขอบไฮไลต์บาง ๆ */}
+              <path
+                d="M54 140 L54 44"
+                stroke="url(#edgeHighlight)"
+                strokeWidth="12"
+                strokeLinecap="round"
+                style={{ opacity: 0.35, filter: "blur(6px)" }}
+              />
+
+              {/* จุดประกายเล็ก */}
+              <circle cx="54" cy="26" r="2.5" fill="white" opacity="0.9">
+                <animate attributeName="r" values="2;4;2" dur="1.8s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.8s" repeatCount="indefinite"/>
+              </circle>
+            </svg>
+          </div>
+
+            {/* ป้ายบอกตำแหน่ง  */}
+            <div className="mt-4 inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-white/90 text-sm">
+              กล้องอยู่ด้านบนของหน้าจอ
+            </div>
+          </div>
+
+          {/* เส้นแสงขอบล่าง */}
+          <div className="absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden">
+            <div
+              className="w-[200%] h-full animate-lightScan"
+              style={{
+                background:
+                  "linear-gradient(90deg, transparent 0%, rgba(255,255,255,.22) 15%, rgba(255,255,255,.55) 30%, rgba(255,255,255,.22) 45%, transparent 60%)",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* นับถอยหลังกึ่งกลางจอ  */}
       {countdown && !capturedImage && (
         <div className="absolute inset-0 grid place-items-center">
-          <div className="text-white drop-shadow-[0_2px_10px_rgba(0,0,0,.7)] text-[20vw] leading-none font-bold select-none">
+          <div className="text-white drop-shadow-[0_2px_10px_rgba(0,0,0,.7)] text-[20vw] leading-none font-bold select-none animate-zoomIn">
             {countdown}
           </div>
         </div>
       )}
 
-      {/* แถบควบคุมบน (ซ้าย: Logout / ขวา: Fill/Contain) — ซ่อนชั่วคราวตอนกำลังถ่าย */}
+      {/* แถบควบคุมบน (ซ้าย: Logout / ขวา: Fill/Contain) */}
       <div
         className={`absolute top-4 left-4 right-4 flex items-center justify-between transition-all duration-200 ${
           hideUi ? "opacity-0 pointer-events-none" : "opacity-100"
@@ -269,7 +422,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
           </div>
           <Button
             variant="outline"
-            onClick={() => setFitMode((m) => (m === "cover" ? "contain" : "cover"))}
+            onClick={() =>
+              setFitMode((m) => (m === "cover" ? "contain" : "cover"))
+            }
             className="backdrop-blur-md bg-white/10 text-white border-white/30 hover:bg-white/20"
             disabled={hideUi}
           >
@@ -278,10 +433,12 @@ export default function PhotoboothInterface({ user, onLogout }) {
         </div>
       </div>
 
-      {/* แถบปุ่มกึ่งกลางด้านล่าง — ซ่อนทั้งหมดตอนกำลังถ่าย */}
+      {/* แถบปุ่มกึ่งกลางด้านล่าง — ❗คงสี/เงาเดิม */}
       <div
         className={`absolute inset-x-0 bottom-6 flex justify-center px-4 transition-all duration-200 ${
-          hideUi ? "opacity-0 pointer-events-none translate-y-2" : "opacity-100 translate-y-0"
+          hideUi
+            ? "opacity-0 pointer-events-none translate-y-2"
+            : "opacity-100 translate-y-0"
         }`}
       >
         <div className="w-full max-w-[720px] rounded-2xl border border-white/15 bg-black/35 backdrop-blur-2xl shadow-[0_10px_40px_rgba(0,0,0,.45)] p-3">
@@ -305,7 +462,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
                 onClick={handleRetake}
                 variant="outline"
                 className={`h-14 px-6 text-base md:text-lg rounded-xl border-white/40 text-white bg-white/10 hover:bg-white/20 ${
-                  buttonsReady ? "ring-2 ring-rose-500/80 shadow-lg shadow-rose-500 md:shadow-xl md:shadow-rose-500" : "opacity-50 cursor-not-allowed"
+                  buttonsReady
+                    ? "ring-2 ring-rose-500/80 shadow-lg shadow-rose-500 md:shadow-xl md:shadow-rose-500"
+                    : "opacity-50 cursor-not-allowed"
                 }`}
                 disabled={busy || redirecting || !buttonsReady}
               >
@@ -314,7 +473,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
               <Button
                 onClick={handleConfirmCapture}
                 className={`h-14 px-8 text-base md:text-lg font-semibold rounded-xl shadow-lg ${
-                  buttonsReady ? "bg-white text-gray-900 hover:bg-gray-50 ring-4 ring-cyan-500/50 shadow-lg shadow-cyan-500 md:shadow-xl md:shadow-cyan-500" : "bg-gray-300 text-gray-600 cursor-not-allowed"
+                  buttonsReady
+                    ? "bg-white text-gray-900 hover:bg-gray-50 ring-4 ring-cyan-500/50 shadow-lg shadow-cyan-500 md:shadow-xl md:shadow-cyan-500"
+                    : "bg-gray-300 text-gray-600 cursor-not-allowed"
                 }`}
                 disabled={busy || redirecting || !buttonsReady}
               >
@@ -340,6 +501,34 @@ export default function PhotoboothInterface({ user, onLogout }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ===== Keyframes / Utilities – ใช้กับ Overlay เท่านั้น ===== */}
+      <style jsx global>{`
+        @keyframes fadeIn {
+          from { opacity: 0; } to { opacity: 1; }
+        }
+        @keyframes fadeInSlow {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes zoomIn {
+          0% { opacity: 0; transform: scale(0.98); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes bounceArrow {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-8px); }
+        }
+        @keyframes lightScan {
+          0% { transform: translateX(-25%); }
+          100% { transform: translateX(0%); }
+        }
+        .animate-fadeIn { animation: fadeIn 220ms ease-out both; }
+        .animate-fadeInSlow { animation: fadeInSlow 420ms ease-out 80ms both; }
+        .animate-zoomIn { animation: zoomIn 260ms ease-out both; }
+        .animate-bounceArrow { animation: bounceArrow 1.1s ease-in-out infinite; }
+        .animate-lightScan { animation: lightScan 2.2s ease-in-out infinite; }
+      `}</style>
     </div>
   );
 }

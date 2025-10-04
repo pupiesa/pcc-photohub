@@ -19,8 +19,6 @@ import { toast } from "sonner";
 const keyBtn = "h-14 min-w-[3.2rem] text-lg rounded-xl";
 const wideBtn = "h-14 px-5 text-lg rounded-xl bg-linear-65 from-purple-500 to-pink-500 text-white hover:opacity-80";
 const wideBtn2 = "h-14 px-5 text-lg rounded-xl hover:opacity-80";
-
-
 export function InlineOtpKeypad({ visible, setValue, onDone }) {
   if (!visible) return null;
   const keys = ["1","2","3","4","5","6","7","8","9","0"];
@@ -59,7 +57,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
   const [step, setStep] = useState("email");      // 'email' | 'otp' | 'pin1' | 'pin2'
   const [email, setEmail] = useState("");
   const [hasEmail, setHasEmail] = useState(false);
-
+  const [resending, setResending] = useState(false);
   const [otp, setOtp] = useState("");
   const [pin1, setPin1] = useState("");
   const [pin2, setPin2] = useState("");
@@ -136,6 +134,7 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
 
   const resendOtp = async () => {
     if (!email) return;
+    setResending(true);
     try {
       await client.requestEmailOTP({ number: phone, email, heading: 'Verify your PIN change' });
       toast.success("ส่งรหัส OTP ใหม่แล้ว");
@@ -143,6 +142,8 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
       setSecsLeft(OTP_TOTAL_SECS);
     } catch (e) {
       toast.error(`ส่ง OTP ไม่สำเร็จ: ${e?.message || e}`);
+    } finally {
+      setResending(false);
     }
   };
 
@@ -250,13 +251,13 @@ export default function ForgotPinDialog({ open, onOpenChange, phone, afterReset 
                       : "[&>div]:bg-blue-600",
                 ].join(" ")}
               />
-              {secsLeft === 0 && (
-                <div className="text-right">
-                  <Button variant="outline" size="sm" onClick={resendOtp}>
-                    ส่งรหัสใหม่
-                  </Button>
-                </div>
-              )}
+             {secsLeft === 0 && (
+              <div className="text-right">
+                <Button variant="outline" size="sm" onClick={resendOtp} disabled={resending}>
+                  {resending ? (<><Loader className="mr-2" />กำลังส่ง OTP ใหม่</>) : "ส่งรหัสใหม่"}
+                </Button>
+              </div>
+            )}
             </div>
 
             <div className="mt-2">
