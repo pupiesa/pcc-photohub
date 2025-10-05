@@ -13,6 +13,10 @@ import {
 import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
+const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
+const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
+
 /* ---------------- Default Logo (fallback) ---------------- */
 const DefaultLogo = (props: React.SVGAttributes<SVGElement>) => (
   <svg
@@ -105,6 +109,7 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
       className,
       logo,
       logoImageSrc = "/image/PccPhotoboothtLogo.png",
+      logoHref = "/",
       navigationLinks = defaultNavigationLinks,
 
       showLogout = true,
@@ -115,9 +120,10 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
       enableAutoLogout = false,
       autoLogoutMs = 5 * 60 * 1000, // 5 นาที
       autoLogoutWarnAt = 20, // 20s ก่อนหมดเวลา
-      autoLogoutPlayUrl,
+      autoLogoutPlayUrl = `${PRINT_BASE}/play/thankyou.wav`,
 
-      ...props
+      // ❗️ อย่าส่ง custom props ลง DOM
+      // ...props  <-- ลบออกเพื่อป้องกัน warning React DOM
     },
     ref
   ) => {
@@ -237,16 +243,16 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
         <header
           ref={combinedRef}
           className={cn("w-full z-50", className)}
-          {...props}
+          // ไม่ส่ง {...props} เพื่อกัน custom props หลุดลง DOM
         >
           <div className="container mx-auto flex h-14 items-center justify-between gap-4 px-4">
-            {/* Logo */}
-            <div className="flex items-center gap-2">
+            {/* Logo (clickable) */}
+            <Link href={logoHref} className="flex items-center gap-2">
               <span className="text-xl">{LogoNode}</span>
               <span className="font-semibold text-lg sm:inline-block">
                 Pcc-photohub
               </span>
-            </div>
+            </Link>
 
             {/* Right zone */}
             <div className="flex items-center gap-3">
