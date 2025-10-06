@@ -13,6 +13,7 @@
     "smtp": "node --env-file=.env photobootAPI/smtp-api/smtpAPI.js",
     "dev": "node dev-supervisor.mjs",
     "server": "node dev-server-supervisor.mjs",
+    "camera": "bash ./run_CameraServer.sh",
     "install:all": "npm --prefix ./photobootAPI/mongo-api i && npm --prefix ./photobootAPI/nextcloud-api i && npm --prefix ./photobootAPI/smtp-api i && npm --prefix ./photobootAPI/print-api i"
   },
   "dependencies": {

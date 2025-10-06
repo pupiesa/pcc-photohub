@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { Camera } from 'lucide-react';
 import { spawn } from 'node:child_process';
 
 /** ------------ CONFIG ------------- */
@@ -23,6 +24,7 @@ const procs = {
   smtp:  { child: null, fails: 0, cooldownUntil: 0, name: 'smtp',      base: SMTP_BASE,  path: '/' }, // smtp ไม่มี /api/health ก็เช็ค /
   ui:    { child: null, name: 'ui' },
   print: { child: null, name: 'print' },
+  camera:   { child: null, name: 'camera' },
 };
 
 /** ------------ UTILS ------------- */
@@ -106,6 +108,13 @@ function startUI() {
   });
 }
 
+function startCamera() {
+  if (procs.camera?.child) return;
+  log('camera', 'starting...', 'cyan');
+  procs.camera = { child: spawn('bash', ['./run_CameraServer.sh'], { stdio: 'inherit', shell: true }) };
+  procs.camera.child.on('exit', (c,s)=>{ log('camera',`exited code=${c} sig=${s}`,'yellow'); procs.camera.child=null; });
+}
+
 function starprint() {
   if (procs.print.child) return;
   log('printer', 'starting...', 'green');
@@ -173,6 +182,7 @@ function main() {
   startSMTP();
   startUI();
   starprint();
+  startCamera();
 
   setTimeout(healthLoop, STARTUP_GRACE_MS);
   setInterval(healthLoop, CHECK_INTERVAL_MS);
@@ -184,6 +194,7 @@ function main() {
     await killTree(procs.smtp.child);
     await killTree(procs.ui.child);
     await killTree(procs.print.child);
+    await killTree(procs.camera.child);
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
