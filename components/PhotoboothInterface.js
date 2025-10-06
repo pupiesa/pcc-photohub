@@ -163,9 +163,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const handleConfirmCapture = async () => {
     try {
       setBusy(true);
-      const nextPaths = capturedServerPath
-        ? [...sessionPaths, capturedServerPath]
-        : [...sessionPaths];
+      const nextPaths = capturedServerPath ? [...sessionPaths, capturedServerPath] : [...sessionPaths];
       const nextCount = photosTaken + 1;
 
       setCapturedImage(null);
@@ -220,10 +218,29 @@ export default function PhotoboothInterface({ user, onLogout }) {
   };
 
   const handleRetake = async () => {
-    setCapturedImage(null);
-    setCapturedServerPath(null);
-    setCountdown(null);
-    setLiveLoading(true);
+    try {
+     setBusy(true);
+      setCapturedImage(null);
+      setCapturedServerPath(null);
+      setCountdown(null);
+
+      if (CAMERA_BASE) {
+       const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => null);
+        let nextLive = `${CAMERA_BASE}/video_feed?ts=${Date.now()}`;
+        if (r && r.ok) {
+          try {
+            const data = await r.json();
+            if (data?.video) nextLive = `${CAMERA_BASE}${data.video}`;
+          } catch { /* /return_live จะไม่เป็น JSON ก็ไม่เป็นไร */ }
+        }
+        setLiveSrc(nextLive);
+        // บังคับโหลดใหม่
+        if (liveImgRef.current) liveImgRef.current.src = nextLive;
+      }
+    } finally {
+      setLiveLoading(true);
+      setBusy(false);
+    }
   };
 
   // ซ่อน UI ตอนกำลังนับ/ลั่นชัตเตอร์
