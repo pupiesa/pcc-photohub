@@ -31,7 +31,7 @@ def get_local_ips():
     return sorted(ips)
 
 
-def generate_cors_origins(ports=[1500, 2000, 3000, 5000, 8080]):
+def generate_cors_origins(ports=[4000, 2000, 3000, 5000, 8080]):
     """
     Generate CORS origins for all detected IPs and ports.
     """

@@ -31,7 +31,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   const [countdown, setCountdown] = useState(null);
   const [shooting, setShooting] = useState(false);
-  const [preMessage, setPreMessage] = useState(false); // ✅ Overlay ก่อนนับ
+  const [preMessage, setPreMessage] = useState(false); //Overlay ก่อนนับ
   const [photosTaken, setPhotosTaken] = useState(0);
   const [capturedImage, setCapturedImage] = useState(null);
   const [capturedServerPath, setCapturedServerPath] = useState(null);
@@ -191,9 +191,11 @@ export default function PhotoboothInterface({ user, onLogout }) {
             fetch(`${PRINT_BASE}/play/print.wav`).catch(() => {});
           } else {
             console.error("Print API call failed:", await apiRes.text());
+            toast.error("ไม่สามารถปริ้นได้ เนื่องจากไม่ได้ต่อปริ้นเตอร์");
           }
         } catch (err) {
-          console.error("Error call Print API:", err);
+          console.error("Error call Print API:",err);
+          toast.error("Print error:",err);
         }
         return;
       }

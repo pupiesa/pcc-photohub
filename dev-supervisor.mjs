@@ -100,7 +100,7 @@ function startSMTP() {
 
 function startUI() {
   if (procs.ui.child) return;
-  log('ui', 'starting...', 'cyan');
+  log('ui', 'starting...', 'green');
   procs.ui.child = spawn('npm', ['run', 'ui'], { stdio: 'inherit', shell: true });
   procs.ui.child.on('exit', (code, sig) => {
     log('ui', `exited (code=${code} sig=${sig})`, 'yellow');
@@ -110,7 +110,7 @@ function startUI() {
 
 function startCamera() {
   if (procs.camera?.child) return;
-  log('camera', 'starting...', 'cyan');
+  log('camera', 'starting...', 'green');
   procs.camera = { child: spawn('bash', ['./run_CameraServer.sh'], { stdio: 'inherit', shell: true }) };
   procs.camera.child.on('exit', (c,s)=>{ log('camera',`exited code=${c} sig=${s}`,'yellow'); procs.camera.child=null; });
 }

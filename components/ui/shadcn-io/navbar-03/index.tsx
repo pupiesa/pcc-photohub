@@ -247,12 +247,12 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
         >
           <div className="container mx-auto flex h-14 items-center justify-between gap-4 px-4">
             {/* Logo (clickable) */}
-            <Link href={logoHref} className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <span className="text-xl">{LogoNode}</span>
               <span className="font-semibold text-lg sm:inline-block">
                 Pcc-photohub
               </span>
-            </Link>
+            </div>
 
             {/* Right zone */}
             <div className="flex items-center gap-3">

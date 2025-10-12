@@ -19,10 +19,10 @@ const BGGradient = dynamic(
 
 // ข้อมูลสินค้า
 const PRODUCTS = [
-  { name: "Print 4x6 (Glossy)", price: "฿50", image: "/image/collection/overlay.png", newproduct: true},
-  { name: "Print 4x6 (Matte)", price: "฿55", image: "/image/about/saturuLogo.jpg" },
-  { name: "Print 4x6 (Premium)", price: "฿50", image: "/image/about/saturuLogo.jpg" },
-  { name: "Print 4x6 (Special Edition)", price: "฿50", image: "/image/about/saturuLogo.jpg"},
+  { name: "Print 4x6 (kmitl2025)", price: "฿50", image: "/image/collection/kmitl2025.webp", newproduct: true},
+  { name: "Print 4x6 (gitcode)", price: "฿55", image: "/image/collection/gitcode.webp", newproduct: true},
+  { name: "Print 4x6 (Premium)", price: "฿50", image: "/image/collection/camera.webp", newproduct: true},
+  { name: "Print 4x6 (Special Edition)", price: "฿50", image: "/image/collection/computer.webp", newproduct: true},
   { name: "Print 4x6 (Special Edition)", price: "฿50", image: "/image/about/saturuLogo.jpg" },
   { name: "Print 4x6 (Special Edition)", price: "฿50", image: "/image/about/saturuLogo.jpg" },
   { name: "Print 4x6 (Special Edition)", price: "฿50", image: "/image/about/saturuLogo.jpg" },
