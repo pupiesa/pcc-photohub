@@ -108,7 +108,7 @@ export const Navbar03 = React.forwardRef<HTMLElement, Navbar03Props>(
     {
       className,
       logo,
-      logoImageSrc = "/image/PccPhotoboothtLogo.png",
+      logoImageSrc = "/image/PccPhotoboothtLogo.webp",
       logoHref = "/",
       navigationLinks = defaultNavigationLinks,
 

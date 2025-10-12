@@ -282,23 +282,45 @@ export default function CustomerDashboard() {
   };
 
   const handleVerifyOtp = async () => {
-    if (!/^\d{6}$/.test(otp) || !phone || sending) return;
-    setFlowError(null); setSending(true);
+  if (!/^\d{6}$/.test(otp) || !phone || sending) return;
+  setFlowError(null); setSending(true);
+  try {
+    await client.confirmEmailOTP({ number: phone, email: email.trim(), otp });
+    await client.setGmail(phone, email.trim());
+    await client.setConsentedTrue(phone);
+
+    // 🔒  Nextcloud 
     try {
-      await client.confirmEmailOTP({ number: phone, email: email.trim(), otp });
-      await client.setGmail(phone, email.trim());
-      await client.setConsentedTrue(phone);
-      toast.success("ยืนยันอีเมลสำเร็จ");
-      setOpenEmailFlow(false);
-      setStep("email");
-      setShowOtpKb(false);
-      refresh();
-    } catch (e) {
-      //console.error(e);
-      setFlowError(e?.message || "ยืนยันรหัสไม่สำเร็จ กรุณาลองใหม่");
-      toast.error(e?.message || "ยืนยันรหัสไม่สำเร็จ");
-    } finally { setSending(false); }
-  };
+      const shareRes = await client.shareOnlyForUser({
+        number: phone,
+        linkPassword: phone,  
+        permissions: 1,
+        publicUpload: false,
+        note: `PCC PhotoHub Share for ${email.trim()}`,
+        forceNew: true,
+      });
+
+      if (shareRes?.link) {
+        await client.setNextcloudLink(phone, shareRes.link);
+        toast.success("สร้างลิงก์แชร์สำเร็จ");
+      } else {
+        toast.warning("สร้างลิงก์ไม่สำเร็จ แต่ยืนยันอีเมลแล้ว");
+      }
+    } catch (err) {
+      console.log("Nextcloud share error:", err);
+      toast.error("ไม่สามารถสร้างลิงก์แชร์ได้");
+    }
+
+    toast.success("ยืนยันอีเมลสำเร็จ");
+    setOpenEmailFlow(false);
+    setStep("email");
+    setShowOtpKb(false);
+    refresh();
+  } catch (e) {
+    setFlowError(e?.message || "ยืนยันรหัสไม่สำเร็จ กรุณาลองใหม่");
+    toast.error(e?.message || "ยืนยันรหัสไม่สำเร็จ");
+  } finally { setSending(false); }
+};
 
   const otpProgress = useMemo(() => {
     const p = Math.max(0, Math.min(100, (otpSecsLeft / OTP_TOTAL_SECS) * 100));

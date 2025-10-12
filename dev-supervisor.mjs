@@ -115,7 +115,7 @@ function startCamera() {
   procs.camera.child.on('exit', (c,s)=>{ log('camera',`exited code=${c} sig=${s}`,'yellow'); procs.camera.child=null; });
 }
 
-function starprint() {
+function startPrint() {
   if (procs.print.child) return;
   log('printer', 'starting...', 'green');
   procs.nc.child = spawn('node', ['--env-file=.env', 'photobootAPI/print-api/index.js'], { stdio: 'inherit', shell: true });
@@ -181,7 +181,7 @@ function main() {
   startNC();
   startSMTP();
   startUI();
-  starprint();
+  startPrint();
   startCamera();
 
   setTimeout(healthLoop, STARTUP_GRACE_MS);

@@ -18,7 +18,7 @@ const PEOPLE = [
     title: "Founder & Lead Developer",
     desc:
       "Fontend Stripe QR-PromptPay",
-    image: "/image/about/DUS.jpg"
+    image: "/image/about/IMG1.webp"
   },
   {
     side: "right",
@@ -26,7 +26,7 @@ const PEOPLE = [
     title: "Co-founder & Operations",
     desc:
       "Imagecloud DataBase API Backend",
-    image: "/image/about/CHP-7.jpg"
+    image: "/image/about/IMG2.webp"
   },
   {
     side: "left",
@@ -34,7 +34,7 @@ const PEOPLE = [
     title: "CTO & Infrastructure",
     desc:
       "SystemHardware  Micro-APIs  3D-printer",
-    image: "/image/about/CHP-42.jpg"
+    image: "/image/about/IMG3.webp"
   },
   {
     side: "right",
@@ -42,7 +42,7 @@ const PEOPLE = [
     title: "Design & Support",
     desc:
       "UI Logo security guard",
-    image: "/image/about/IMG.jpg"
+    image: "/image/about/IMG4.webp"
   }
 ];
 
@@ -78,7 +78,7 @@ export default function AboutPage() {
       {/* เนื้อหา */}
       <main className="relative z-10 flex flex-col flex-1 items-center justify-start pt-10 pb-12">
         <Image
-          src="/image/saturuLogo.jpg"
+          src="/image/saturuLogo.webp"
           alt="Logo"
           width={120}
           height={120}

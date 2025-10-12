@@ -32,8 +32,8 @@ FRONTEND_ORIGIN = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
 CAMERA_PORT_ENV = (os.getenv("CAMERA_PORT") or "").strip() or None
 def _clamp_fps(x):
     try: return max(1.0, min(60.0, float(x)))
-    except: return 18.0
-preview_fps = _clamp_fps(os.getenv("PREVIEW_FPS", 24))
+    except: return 60.0
+preview_fps = _clamp_fps(os.getenv("PREVIEW_FPS", 60))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAVE_DIR = (os.getenv("CAPTURE_SAVE_DIR") or "").strip() or os.path.join(BASE_DIR, "captured_images")
@@ -712,4 +712,5 @@ if __name__ == '__main__':
     monitor_thread = threading.Thread(target=monitor_cameras, daemon=True); monitor_thread.start()
     cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True); cleanup_thread.start()
 
-    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=int(os.getenv("SetCamera_PORT", "8080")), debug=False, use_reloader=False)
+# ===================== End =====================

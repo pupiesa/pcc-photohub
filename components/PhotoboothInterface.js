@@ -190,11 +190,11 @@ export default function PhotoboothInterface({ user, onLogout }) {
           if (apiRes.ok) {
             fetch(`${PRINT_BASE}/play/print.wav`).catch(() => {});
           } else {
-            console.error("Print API call failed:", await apiRes.text());
+            console.log("Print API call failed:", await apiRes.text());
             toast.error("ไม่สามารถปริ้นได้ เนื่องจากไม่ได้ต่อปริ้นเตอร์");
           }
         } catch (err) {
-          console.error("Error call Print API:",err);
+          console.log("Error call Print API:",err);
           toast.error("Print error:",err);
         }
         return;

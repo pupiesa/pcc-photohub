@@ -20,7 +20,7 @@ export default function CouponPaymentPanel({
   timeLeft = 0,
   expireSeconds = 120,
   formatTime = (s) => s,
-  logoSrc = "/image/Thai_QR_Payment_Logo-01.jpg",
+  logoSrc = "/image/Thai_QR_Payment_Logo-01.webp",
 }) {
   const inputRef = useRef(null);
 
