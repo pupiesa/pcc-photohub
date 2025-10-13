@@ -182,7 +182,7 @@ function main() {
   startSMTP();
   startUI();
   startPrint();
-  startCamera();
+  //startCamera();
 
   setTimeout(healthLoop, STARTUP_GRACE_MS);
   setInterval(healthLoop, CHECK_INTERVAL_MS);

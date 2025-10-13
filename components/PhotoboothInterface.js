@@ -29,9 +29,10 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  // ===== Core States =====
   const [countdown, setCountdown] = useState(null);
   const [shooting, setShooting] = useState(false);
-  const [preMessage, setPreMessage] = useState(false); //Overlay ก่อนนับ
+  const [preMessage, setPreMessage] = useState(false);
   const [photosTaken, setPhotosTaken] = useState(0);
   const [capturedImage, setCapturedImage] = useState(null);
   const [capturedServerPath, setCapturedServerPath] = useState(null);
@@ -39,7 +40,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const [busy, setBusy] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
 
-  // ดีเลย์ปุ่ม 2.5 วิ หลังถ่ายเสร็จ
+  // ===== Session key to avoid stream conflicts =====
+  const SESSION_KEY = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    let s = sessionStorage.getItem("camSession");
+    if (!s) {
+      s = crypto.randomUUID();
+      sessionStorage.setItem("camSession", s);
+    }
+    return s;
+  }, []);
+
+  // ===== Delay confirm/retake buttons a bit after capture =====
   const [buttonsReady, setButtonsReady] = useState(false);
   useEffect(() => {
     if (capturedImage) {
@@ -50,42 +62,125 @@ export default function PhotoboothInterface({ user, onLogout }) {
     setButtonsReady(false);
   }, [capturedImage]);
 
-  // live preview
+  // ===== Live preview states/refs =====
   const [liveSrc, setLiveSrc] = useState(null);
   const [liveLoading, setLiveLoading] = useState(true);
   const liveImgRef = useRef(null);
 
-  // โหมดแสดงผลภาพ: cover = เต็มจอ (อาจครอป), contain = ทั้งภาพ (อาจมีขอบ)
-  const [fitMode, setFitMode] = useState("cover"); // "cover" | "contain"
+  // Fit mode for <img> (kept as in your UI)
+  const [fitMode, setFitMode] = useState("cover");
   const objectClass = useMemo(
     () => (fitMode === "cover" ? "object-cover" : "object-contain"),
     [fitMode]
   );
 
+  // ===== Retry/backoff for live preview =====
+  const retryRef = useRef({ tries: 0, timer: null });
+  const MAX_RETRY = 10;
+  const baseDelay = 900;
+  const jitter = () => Math.random() * 300;
+
+  const makeLiveUrl = () => {
+    if (!CAMERA_BASE) return null;
+    const ts = Date.now();
+    return `${CAMERA_BASE}/video_feed?session=${SESSION_KEY}&ts=${ts}`;
+  };
+
+  const resetRetry = () => {
+    clearTimeout(retryRef.current.timer);
+    retryRef.current.tries = 0;
+  };
+
+  const reloadLive = (delay = baseDelay) => {
+    clearTimeout(retryRef.current.timer);
+    retryRef.current.timer = setTimeout(() => {
+      retryRef.current.tries = Math.min(retryRef.current.tries + 1, MAX_RETRY);
+      const url = makeLiveUrl();
+      if (url) setLiveSrc(url);
+    }, delay + jitter());
+  };
+
+  // ===== Health-check + auto-recover =====
+  const healthTimerRef = useRef(null);
+  const startHealthWatch = useMemo(
+    () => () => {
+      clearInterval(healthTimerRef.current);
+      if (!CAMERA_BASE) return;
+
+      healthTimerRef.current = setInterval(async () => {
+        try {
+          const r = await fetch(`${CAMERA_BASE}/api/health`, { cache: "no-store" });
+          const h = await r.json().catch(() => ({}));
+
+          if (!h?.running || h?.paused) {
+            await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
+            reloadLive(450);
+          }
+
+          if (h?.viewers_maxed) {
+            reloadLive(1500);
+          }
+        } catch {
+          fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
+          reloadLive(1200);
+        }
+      }, 5000);
+    },
+    [CAMERA_BASE, SESSION_KEY]
+  );
+
+  useEffect(() => {
+    startHealthWatch();
+    return () => clearInterval(healthTimerRef.current);
+  }, [startHealthWatch]);
+
+  // ===== Start/stop live with page mount/unmount =====
   const stopCamera = async () => {
     if (!CAMERA_BASE) return;
     try {
       await Promise.any([
         fetch(`${CAMERA_BASE}/stop_stream`, { method: "POST" }),
         fetch(`${CAMERA_BASE}/stop`, { method: "POST" }),
-      ]);
+        fetch(`${CAMERA_BASE}/pause`, { method: "POST" }),
+      ]).catch(() => {});
     } catch {}
   };
 
   useEffect(() => {
-    if (!CAMERA_BASE || pathname !== "/booth") return;
+    if (!CAMERA_BASE || pathname !== "/booth" || !SESSION_KEY) return;
+
     setLiveLoading(true);
-    setLiveSrc(`${CAMERA_BASE}/video_feed?ts=${Date.now()}`);
+    resetRetry();
+    const url = makeLiveUrl();
+    setLiveSrc(url);
+
     return () => {
-      if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
+      try {
+        if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
+      } catch {}
       setLiveSrc(null);
       setLiveLoading(true);
+      resetRetry();
       stopCamera();
     };
-  }, [pathname]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, CAMERA_BASE, SESSION_KEY]);
 
-  // เริ่มถ่าย: โชว์ overlay 4 วินาที → ค่อยเริ่มนับ 3-2-1
+  // ===== Handlers for live <img> =====
+  const onLiveLoad = () => {
+    setLiveLoading(false);
+    resetRetry();
+  };
+  const onLiveError = () => {
+    setLiveLoading(false);
+    const tries = retryRef.current.tries;
+    const nextDelay = Math.min(baseDelay * (1 + tries), 3000);
+    reloadLive(nextDelay);
+  };
+
+  // ===== Photo flow: overlay -> countdown -> capture =====
   const startPhotoshoot = () => {
+    if (shooting || busy) return;
     setShooting(true);
     setPreMessage(true);
 
@@ -95,7 +190,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
       let count = 3;
       setCountdown(count);
       const timer = setInterval(() => {
-        count--;
+        count -= 1;
         if (count > 0) setCountdown(count);
         else {
           setCountdown("📸");
@@ -106,64 +201,103 @@ export default function PhotoboothInterface({ user, onLogout }) {
           clearInterval(timer);
         }
       }, 1000);
-    }, 2800); // เตือน 2.8 วินาที
+    }, 2800);
   };
 
+  // ===== Capture with hard-timeout + session =====
   const handleCapture = async () => {
+    if (!CAMERA_BASE || !SESSION_KEY) return;
+    setBusy(true);
+
+    const ctrl = new AbortController();
+    const CAPTURE_TIMEOUT_MS = 6500;
+    const kill = setTimeout(() => ctrl.abort(), CAPTURE_TIMEOUT_MS);
+
     try {
-      if (!CAMERA_BASE) throw new Error("CAMERA_BASE not set");
       fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {});
       const res = await fetch(`${CAMERA_BASE}/capture`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: SESSION_KEY }),
+        signal: ctrl.signal,
       });
-      if (!res.ok)
-        throw new Error((await res.text()) || `Capture failed: ${res.status}`);
-      const data = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 429 || res.status === 410) {
+          await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
+          reloadLive(1200);
+        }
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `Capture failed: ${res.status}`);
+      }
+
+      const data = await res.json().catch(() => ({}));
       const url = data?.url;
+      const serverPath = data?.serverPath || data?.path || null;
+
       if (!url) throw new Error("No image url returned");
       setCapturedImage(`${CAMERA_BASE}${url}?ts=${Date.now()}`);
-      setCapturedServerPath(data?.serverPath || null);
+      setCapturedServerPath(serverPath);
+
+      try {
+        if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
+      } catch {}
+      setLiveSrc(null);
+      setLiveLoading(true);
     } catch (err) {
+      console.error("Capture error:", err);
       toast.error("การเชื่อมต่อผิดพลาด ถ่ายภาพไม่สำเร็จ");
+      await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
+      reloadLive(1200);
     } finally {
+      clearTimeout(kill);
+      setBusy(false);
       setShooting(false);
     }
   };
 
+  // ===== Upload batch then navigate =====
   const uploadBatchAndGo = async (paths) => {
     const number = user?.phone || user?.number;
-    if (!number || !paths.length) return;
+    if (!number || !paths?.length) return;
 
-    const remotes = [];
-    const up1 = await client.uploadAndShare({
-      folderName: number,
-      filePath: paths[0],
-    });
-    if (up1?.share?.url) await client.setNextcloudLink(number, up1.share.url);
-    if (up1?.uploaded?.remotePath) remotes.push(up1.uploaded.remotePath);
-
-    for (let i = 1; i < paths.length; i++) {
-      const r = await client.uploadOnly({
+    try {
+      const remotes = [];
+      const up1 = await client.uploadAndShare({
         folderName: number,
-        filePath: paths[i],
+        filePath: paths[0],
       });
-      if (r?.uploaded?.remotePath) remotes.push(r.uploaded.remotePath);
+      if (up1?.share?.url) await client.setNextcloudLink(number, up1.share.url);
+      if (up1?.uploaded?.remotePath) remotes.push(up1.uploaded.remotePath);
+
+      for (let i = 1; i < paths.length; i++) {
+        const r = await client.uploadOnly({
+          folderName: number,
+          filePath: paths[i],
+        });
+        if (r?.uploaded?.remotePath) remotes.push(r.uploaded.remotePath);
+      }
+      if (remotes.length) await client.appendFileAddress(number, remotes);
+    } catch (e) {
+      console.error("uploadBatchAndGo failed:", e);
+    } finally {
+      try {
+        if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
+      } catch {}
+      setLiveSrc(null);
+      await stopCamera().catch(() => {});
+      setRedirecting(true);
+      router.push("/dashboard");
     }
-    if (remotes.length) await client.appendFileAddress(number, remotes);
-
-    if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
-    setLiveSrc(null);
-    await stopCamera().catch(() => {});
-
-    setRedirecting(true);
-    router.push("/dashboard");
   };
 
+  // ===== Confirm photo =====
   const handleConfirmCapture = async () => {
     try {
       setBusy(true);
-      const nextPaths = capturedServerPath ? [...sessionPaths, capturedServerPath] : [...sessionPaths];
+      const nextPaths = capturedServerPath
+        ? [...sessionPaths, capturedServerPath]
+        : [...sessionPaths];
       const nextCount = photosTaken + 1;
 
       setCapturedImage(null);
@@ -172,20 +306,19 @@ export default function PhotoboothInterface({ user, onLogout }) {
       setPhotosTaken(nextCount);
 
       if (nextCount >= MAX_PHOTOS) {
-        if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
+        try {
+          if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
+        } catch {}
         setLiveSrc(null);
         await stopCamera().catch(() => {});
         await uploadBatchAndGo(nextPaths);
 
-        // สั่งพิมพ์
+        // Print
         try {
           const apiRes = await fetch(`${PRINT_BASE}/print`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              paths: nextPaths,
-              templateKey: TEMPLATE_KEY,
-            }),
+            body: JSON.stringify({ paths: nextPaths, templateKey: TEMPLATE_KEY }),
           });
           if (apiRes.ok) {
             fetch(`${PRINT_BASE}/play/print.wav`).catch(() => {});
@@ -194,49 +327,53 @@ export default function PhotoboothInterface({ user, onLogout }) {
             toast.error("ไม่สามารถปริ้นได้ เนื่องจากไม่ได้ต่อปริ้นเตอร์");
           }
         } catch (err) {
-          console.log("Error call Print API:",err);
-          toast.error("Print error:",err);
+          console.log("Print API error:", err);
+          toast.error("Print error:", err?.message || "Unknown");
         }
         return;
       }
 
+      // Not finished yet -> back to live
       if (CAMERA_BASE) {
-        const r = await fetch(`${CAMERA_BASE}/confirm`, {
-          method: "POST",
-        }).catch(() => null);
-        let nextLive = `${CAMERA_BASE}/video_feed?ts=${Date.now()}`;
+        const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(
+          () => null
+        );
+        let nextLive = makeLiveUrl();
         if (r && r.ok) {
           const data = await r.json().catch(() => ({}));
-          if (data?.video) nextLive = `${CAMERA_BASE}${data.video}`;
+          if (data?.video) nextLive = `${CAMERA_BASE}${data.video}?ts=${Date.now()}`;
         }
         setLiveLoading(true);
         setLiveSrc(nextLive);
       }
     } catch (err) {
-      console.error(err);
+      console.error("handleConfirmCapture error:", err);
     } finally {
       setBusy(false);
     }
   };
 
+  // ===== Retake photo =====
   const handleRetake = async () => {
     try {
-     setBusy(true);
+      setBusy(true);
       setCapturedImage(null);
       setCapturedServerPath(null);
       setCountdown(null);
 
       if (CAMERA_BASE) {
-       const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => null);
-        let nextLive = `${CAMERA_BASE}/video_feed?ts=${Date.now()}`;
+        const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(
+          () => null
+        );
+        let nextLive = makeLiveUrl();
         if (r && r.ok) {
           try {
             const data = await r.json();
-            if (data?.video) nextLive = `${CAMERA_BASE}${data.video}`;
-          } catch { /* /return_live จะไม่เป็น JSON ก็ไม่เป็นไร */ }
+            if (data?.video)
+              nextLive = `${CAMERA_BASE}${data.video}?ts=${Date.now()}`;
+          } catch {}
         }
         setLiveSrc(nextLive);
-        // บังคับโหลดใหม่
         if (liveImgRef.current) liveImgRef.current.src = nextLive;
       }
     } finally {
@@ -245,9 +382,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
     }
   };
 
-  // ซ่อน UI ตอนกำลังนับ/ลั่นชัตเตอร์
   const hideUi = shooting && !capturedImage;
 
+  // ====== RETURN (kept your UI, with small handler bindings) ======
   return (
     <div className="fixed inset-0 z-20 bg-black">
       {/* ชั้นภาพ (เต็มจอ) */}
@@ -268,8 +405,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
               src={liveSrc ?? undefined}
               alt="Live preview"
               className={`w-full h-full ${objectClass} select-none`}
-              onLoad={() => setLiveLoading(false)}
-              onError={() => setLiveLoading(false)}
+              onLoad={onLiveLoad}
+              onError={onLiveError}
               draggable={false}
             />
           ) : null
@@ -311,82 +448,75 @@ export default function PhotoboothInterface({ user, onLogout }) {
               className="mt-3 mx-auto text-white/80 animate-fadeInSlow"
               style={{ fontSize: "clamp(14px, 2.2vw, 20px)" }}
             >
-              นิ่งไว้สักครู่ เพื่อภาพที่คมชัดและเป็นธรรมชาติ
+              ยิ้มสวย ๆ ความสวยกำลังถูกบันทึกไว้!
             </p>
 
-           {/* ลูกศร SVG */}
-          <div className="mt-8 flex justify-center animate-bounceArrow">
-            <svg
-              width="108"
-              height="156"
-              viewBox="0 0 108 156"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <defs>
-                {/* เส้นไล่สีบนก้าน แอนิเมชันเลื่อนขึ้น */}
-                <linearGradient id="arrowStroke" x1="0" y1="156" x2="0" y2="0" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%"  stopColor="rgba(255,255,255,0.85)"/>
-                  <stop offset="55%" stopColor="rgba(255,255,255,1)"/>
-                  <stop offset="100%" stopColor="rgba(255,255,255,0.85)"/>
-                  <animateTransform
-                    attributeName="gradientTransform"
-                    type="translate"
-                    from="0 0" to="0 -24"
-                    dur="2.2s"
-                    repeatCount="indefinite"
-                  />
-                </linearGradient>
+            {/* ลูกศร SVG */}
+            <div className="mt-8 flex justify-center animate-bounceArrow">
+              <svg
+                width="108"
+                height="156"
+                viewBox="0 0 108 156"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient id="arrowStroke" x1="0" y1="156" x2="0" y2="0" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%"  stopColor="rgba(255,255,255,0.85)"/>
+                    <stop offset="55%" stopColor="rgba(255,255,255,1)"/>
+                    <stop offset="100%" stopColor="rgba(255,255,255,0.85)"/>
+                    <animateTransform
+                      attributeName="gradientTransform"
+                      type="translate"
+                      from="0 0" to="0 -24"
+                      dur="2.2s"
+                      repeatCount="indefinite"
+                    />
+                  </linearGradient>
 
-                {/* glow รอบลูกศร */}
-                <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
-                  <feMerge>
-                    <feMergeNode in="blur"/>
-                    <feMergeNode in="SourceGraphic"/>
-                  </feMerge>
-                </filter>
+                  <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+                    <feMerge>
+                      <feMergeNode in="blur"/>
+                      <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                  </filter>
 
-                {/* ไฮไลต์บาง ๆ บนขอบ */}
-                <linearGradient id="edgeHighlight" x1="0" y1="156" x2="0" y2="0">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.12)"/>
-                  <stop offset="100%" stopColor="rgba(255,255,255,0.28)"/>
-                </linearGradient>
-              </defs>
+                  <linearGradient id="edgeHighlight" x1="0" y1="156" x2="0" y2="0">
+                    <stop offset="0%" stopColor="rgba(255,255,255,0.12)"/>
+                    <stop offset="100%" stopColor="rgba(255,255,255,0.28)"/>
+                  </linearGradient>
+                </defs>
 
-              {/* ก้านลูกศร */}
-              <path
-                d="M54 140 L54 44"
-                stroke="url(#arrowStroke)"
-                strokeWidth="10"
-                strokeLinecap="round"
-                filter="url(#softGlow)"
-              />
+                <path
+                  d="M54 140 L54 44"
+                  stroke="url(#arrowStroke)"
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                  filter="url(#softGlow)"
+                />
 
-              {/* หัวลูกศร */}
-              <path
-                d="M54 18 L31 50 L77 50 Z"
-                fill="white"
-                filter="url(#softGlow)"
-              />
+                <path
+                  d="M54 18 L31 50 L77 50 Z"
+                  fill="white"
+                  filter="url(#softGlow)"
+                />
 
-              {/* ขอบไฮไลต์บาง ๆ */}
-              <path
-                d="M54 140 L54 44"
-                stroke="url(#edgeHighlight)"
-                strokeWidth="12"
-                strokeLinecap="round"
-                style={{ opacity: 0.35, filter: "blur(6px)" }}
-              />
+                <path
+                  d="M54 140 L54 44"
+                  stroke="url(#edgeHighlight)"
+                  strokeWidth="12"
+                  strokeLinecap="round"
+                  style={{ opacity: 0.35, filter: "blur(6px)" }}
+                />
 
-              {/* จุดประกายเล็ก */}
-              <circle cx="54" cy="26" r="2.5" fill="white" opacity="0.9">
-                <animate attributeName="r" values="2;4;2" dur="1.8s" repeatCount="indefinite"/>
-                <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.8s" repeatCount="indefinite"/>
-              </circle>
-            </svg>
-          </div>
+                <circle cx="54" cy="26" r="2.5" fill="white" opacity="0.9">
+                  <animate attributeName="r" values="2;4;2" dur="1.8s" repeatCount="indefinite"/>
+                  <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.8s" repeatCount="indefinite"/>
+                </circle>
+              </svg>
+            </div>
 
             {/* ป้ายบอกตำแหน่ง  */}
             <div className="mt-4 inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-white/90 text-sm">
@@ -416,19 +546,34 @@ export default function PhotoboothInterface({ user, onLogout }) {
         </div>
       )}
 
-      {/* แถบควบคุมบน (ซ้าย: Logout / ขวา: Fill/Contain) */}
+      {/* Top bar (Logout + Connection + Minimal Steps + Fit/Counter) */}
       <div
-        className={`absolute top-4 left-4 right-4 flex items-center justify-between transition-all duration-200 ${
+        className={`absolute top-4 left-4 right-4 flex items-center justify-between gap-3 transition-all duration-200 ${
           hideUi ? "opacity-0 pointer-events-none" : "opacity-100"
         }`}
       >
-        <Button
-          onClick={onLogout}
-          className="bg-rose-500/80 hover:bg-rose-500/90 text-white border border-rose-300/50 backdrop-blur-xl  shadow-lg shadow-cyan-500/50"
-          disabled={busy || redirecting || hideUi}
-        >
-          Logout
-        </Button>
+        {/* Left cluster: Logout + Connection */}
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={onLogout}
+            className="bg-rose-500/80 hover:bg-rose-500/90 text-white border border-rose-300/50 backdrop-blur-xl shadow"
+            disabled={busy || redirecting || hideUi}
+          >
+            Logout
+          </Button>
+
+          {/* Connection Chip (minimal) */}
+          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/15">
+            <span
+              className={`inline-flex h-2 w-2 rounded-full ${
+                liveLoading ? "bg-yellow-400" : liveSrc ? "bg-emerald-400" : "bg-rose-500"
+              }`}
+            />
+            <span className="text-xs text-white/80">
+              {liveLoading ? "Connecting" : liveSrc ? "Ready" : "Offline"}
+            </span>
+          </div>
+        </div>
 
         <div className="flex items-center gap-2">
           <div className="px-3 py-1.5 rounded-full backdrop-blur-xl bg-black/40 text-white text-xs border border-white/20 shadow">
