@@ -16,7 +16,7 @@ import { Loader } from "@/components/ui/shadcn-io/ai/loader";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { toast } from "sonner";
 
-const TEMPLATE_KEY = "kmitl2025";
+const TEMPLATE_KEY = process.env.TEMPLATE || "kmitl2025";
 const CAMERA_BASE =
   (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
@@ -24,6 +24,9 @@ const MAX_PHOTOS = 2;
 const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
 const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
 const PRINT_BASE = `http://${PRINT_HOST}:${PRINT_PORT}`;
+const DELETE_AFTER_UPLOAD =
+  (process.env.NEXT_PUBLIC_DELETE_RECENT_AFTER_UPLOAD || "false")
+    .toLowerCase() === "true";
 
 export default function PhotoboothInterface({ user, onLogout }) {
   const router = useRouter();
@@ -74,8 +77,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
     [fitMode]
   );
 
-  // ===== Retry/backoff for live preview =====
+  // ===== Retry/backoff for live preview + warm-up guard =====
   const retryRef = useRef({ tries: 0, timer: null });
+  const liveStartAtRef = useRef(0);
   const MAX_RETRY = 10;
   const baseDelay = 900;
   const jitter = () => Math.random() * 300;
@@ -83,20 +87,25 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const makeLiveUrl = () => {
     if (!CAMERA_BASE) return null;
     const ts = Date.now();
-    return `${CAMERA_BASE}/video_feed?session=${SESSION_KEY}&ts=${ts}`;
+    return `${CAMERA_BASE}/video_feed?autoconfirm=1&session=${SESSION_KEY}&ts=${ts}`;
   };
 
   const resetRetry = () => {
-    clearTimeout(retryRef.current.timer);
+    try { clearTimeout(retryRef.current.timer); } catch {}
     retryRef.current.tries = 0;
+    retryRef.current.timer = null;
   };
 
   const reloadLive = (delay = baseDelay) => {
-    clearTimeout(retryRef.current.timer);
+    try { clearTimeout(retryRef.current.timer); } catch {}
     retryRef.current.timer = setTimeout(() => {
+      if (capturedImage || redirecting || busy || photosTaken >= MAX_PHOTOS) return;
       retryRef.current.tries = Math.min(retryRef.current.tries + 1, MAX_RETRY);
       const url = makeLiveUrl();
-      if (url) setLiveSrc(url);
+      if (url) {
+        liveStartAtRef.current = Date.now(); // จำเวลาสลับสตรีม
+        setLiveSrc(url);
+      }
     }, delay + jitter());
   };
 
@@ -107,7 +116,11 @@ export default function PhotoboothInterface({ user, onLogout }) {
       clearInterval(healthTimerRef.current);
       if (!CAMERA_BASE) return;
 
-      healthTimerRef.current = setInterval(async () => {
+      const tick = async () => {
+        if (Date.now() - (liveStartAtRef.current || 0) < 3000) return;
+        if (capturedImage || redirecting || busy) return;
+        if (photosTaken >= MAX_PHOTOS) return;
+
         try {
           const r = await fetch(`${CAMERA_BASE}/api/health`, { cache: "no-store" });
           const h = await r.json().catch(() => ({}));
@@ -116,23 +129,29 @@ export default function PhotoboothInterface({ user, onLogout }) {
             await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
             reloadLive(450);
           }
-
-          if (h?.viewers_maxed) {
-            reloadLive(1500);
-          }
         } catch {
           fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
           reloadLive(1200);
         }
-      }, 5000);
+      };
+
+      tick().catch(() => {});
+      healthTimerRef.current = setInterval(tick, 5000);
     },
-    [CAMERA_BASE, SESSION_KEY]
+    [CAMERA_BASE, SESSION_KEY, capturedImage, redirecting, busy, photosTaken]
   );
 
   useEffect(() => {
     startHealthWatch();
     return () => clearInterval(healthTimerRef.current);
   }, [startHealthWatch]);
+
+  useEffect(() => {
+    return () => {
+      try { clearInterval(healthTimerRef.current); } catch {}
+      try { clearTimeout(retryRef.current.timer); } catch {}
+    };
+  }, []);
 
   // ===== Start/stop live with page mount/unmount =====
   const stopCamera = async () => {
@@ -146,13 +165,34 @@ export default function PhotoboothInterface({ user, onLogout }) {
     } catch {}
   };
 
+  const deleteRecentOnServer = async (count = 2) => {
+    if (!CAMERA_BASE || !DELETE_AFTER_UPLOAD) return;
+    try {
+      await fetch(`${CAMERA_BASE}/api/delete_recent?count=${count}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      console.warn("delete_recent failed:", e);
+    }
+  };
+
+  const initLiveFirstTime = useRef(null);
+  initLiveFirstTime.current = async () => {
+    setLiveLoading(true);
+    resetRetry();
+
+    const url = makeLiveUrl();
+    if (url) {
+      liveStartAtRef.current = Date.now();
+      setLiveSrc(url);
+    }
+  };
+
   useEffect(() => {
     if (!CAMERA_BASE || pathname !== "/booth" || !SESSION_KEY) return;
 
-    setLiveLoading(true);
-    resetRetry();
-    const url = makeLiveUrl();
-    setLiveSrc(url);
+    initLiveFirstTime.current?.();
 
     return () => {
       try {
@@ -278,6 +318,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
         if (r?.uploaded?.remotePath) remotes.push(r.uploaded.remotePath);
       }
       if (remotes.length) await client.appendFileAddress(number, remotes);
+      await deleteRecentOnServer(2);
     } catch (e) {
       console.error("uploadBatchAndGo failed:", e);
     } finally {
@@ -306,6 +347,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
       setPhotosTaken(nextCount);
 
       if (nextCount >= MAX_PHOTOS) {
+        try { clearInterval(healthTimerRef.current); } catch {}
         try {
           if (liveImgRef.current) liveImgRef.current.removeAttribute("src");
         } catch {}
@@ -344,6 +386,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
           if (data?.video) nextLive = `${CAMERA_BASE}${data.video}?ts=${Date.now()}`;
         }
         setLiveLoading(true);
+        liveStartAtRef.current = Date.now();
         setLiveSrc(nextLive);
       }
     } catch (err) {
@@ -373,8 +416,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
               nextLive = `${CAMERA_BASE}${data.video}?ts=${Date.now()}`;
           } catch {}
         }
+        liveStartAtRef.current = Date.now();
         setLiveSrc(nextLive);
-        if (liveImgRef.current) liveImgRef.current.src = nextLive;
       }
     } finally {
       setLiveLoading(true);
@@ -423,7 +466,6 @@ export default function PhotoboothInterface({ user, onLogout }) {
       {/* ==========  Overlay ชี้ตำแหน่งกล้อง  ========== */}
       {preMessage && !capturedImage && (
         <div className="absolute inset-0 z-30 overflow-hidden flex items-center justify-center">
-          {/* พื้นหลังมินิมอล + vignette เบา ๆ */}
           <div className="absolute inset-0 bg-neutral-950/85" />
           <div
             className="absolute inset-0 pointer-events-none"
@@ -432,26 +474,19 @@ export default function PhotoboothInterface({ user, onLogout }) {
                 "radial-gradient(60% 50% at 50% 40%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%)",
             }}
           />
-
-          {/* เนื้อหา */}
           <div className="relative z-10 text-center px-6 font-sans tracking-tight">
-            {/* หัวข้อ  */}
             <h1
               className="mx-auto font-semibold text-white animate-zoomIn"
               style={{ fontSize: "clamp(28px, 6.6vw, 64px)", lineHeight: 1.1 }}
             >
               กรุณามองกล้องด้านบน
             </h1>
-
-            {/* บรรทัดรอง — สีขาวโปร่ง */}
             <p
               className="mt-3 mx-auto text-white/80 animate-fadeInSlow"
               style={{ fontSize: "clamp(14px, 2.2vw, 20px)" }}
             >
               ยิ้มสวย ๆ ความสวยกำลังถูกบันทึกไว้!
             </p>
-
-            {/* ลูกศร SVG */}
             <div className="mt-8 flex justify-center animate-bounceArrow">
               <svg
                 width="108"
@@ -466,65 +501,30 @@ export default function PhotoboothInterface({ user, onLogout }) {
                     <stop offset="0%"  stopColor="rgba(255,255,255,0.85)"/>
                     <stop offset="55%" stopColor="rgba(255,255,255,1)"/>
                     <stop offset="100%" stopColor="rgba(255,255,255,0.85)"/>
-                    <animateTransform
-                      attributeName="gradientTransform"
-                      type="translate"
-                      from="0 0" to="0 -24"
-                      dur="2.2s"
-                      repeatCount="indefinite"
-                    />
+                    <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="0 -24" dur="2.2s" repeatCount="indefinite"/>
                   </linearGradient>
-
                   <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
                     <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
-                    <feMerge>
-                      <feMergeNode in="blur"/>
-                      <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
+                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
                   </filter>
-
                   <linearGradient id="edgeHighlight" x1="0" y1="156" x2="0" y2="0">
                     <stop offset="0%" stopColor="rgba(255,255,255,0.12)"/>
                     <stop offset="100%" stopColor="rgba(255,255,255,0.28)"/>
                   </linearGradient>
                 </defs>
-
-                <path
-                  d="M54 140 L54 44"
-                  stroke="url(#arrowStroke)"
-                  strokeWidth="10"
-                  strokeLinecap="round"
-                  filter="url(#softGlow)"
-                />
-
-                <path
-                  d="M54 18 L31 50 L77 50 Z"
-                  fill="white"
-                  filter="url(#softGlow)"
-                />
-
-                <path
-                  d="M54 140 L54 44"
-                  stroke="url(#edgeHighlight)"
-                  strokeWidth="12"
-                  strokeLinecap="round"
-                  style={{ opacity: 0.35, filter: "blur(6px)" }}
-                />
-
+                <path d="M54 140 L54 44" stroke="url(#arrowStroke)" strokeWidth="10" strokeLinecap="round" filter="url(#softGlow)"/>
+                <path d="M54 18 L31 50 L77 50 Z" fill="white" filter="url(#softGlow)"/>
+                <path d="M54 140 L54 44" stroke="url(#edgeHighlight)" strokeWidth="12" strokeLinecap="round" style={{ opacity: 0.35, filter: "blur(6px)" }}/>
                 <circle cx="54" cy="26" r="2.5" fill="white" opacity="0.9">
                   <animate attributeName="r" values="2;4;2" dur="1.8s" repeatCount="indefinite"/>
                   <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.8s" repeatCount="indefinite"/>
                 </circle>
               </svg>
             </div>
-
-            {/* ป้ายบอกตำแหน่ง  */}
             <div className="mt-4 inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-white/90 text-sm">
               กล้องอยู่ด้านบนของหน้าจอ
             </div>
           </div>
-
-          {/* เส้นแสงขอบล่าง */}
           <div className="absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden">
             <div
               className="w-[200%] h-full animate-lightScan"
@@ -677,7 +677,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
         }
         @keyframes zoomIn {
           0% { opacity: 0; transform: scale(0.98); }
-          100% { opacity: 1; transform: scale(1); }
+          100% { opacity: 1; transform: scale(1);
+          }
         }
         @keyframes bounceArrow {
           0%, 100% { transform: translateY(0); }

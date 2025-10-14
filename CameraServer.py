@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""
-CameraServer.py — Cold-probe only (boot/hot-plug) + stable preview/capture
-Features:
-- รองรับ UVC (webcam) และ DSLR (gphoto2)
-- เช็คกล้อง (probe) เฉพาะตอนบูตและตอนเสียบ/ถอด USB (watcher) เท่านั้น
-- /video_feed: ไม่ส่ง 410 แม้ paused; จะค้างสตรีม/ส่งเฟรมล่าสุด ลดรีทราย 2-3 รอบ
-- DSLR: live และ capture ใช้ "กล้องตัวเดียวกัน" พร้อม lock เดียว -> ไม่ claim ซ้ำ (แก้ [-53])
-- UVC: เปิดเฉพาะตอนมี viewers; ปิดเมื่อไม่มีคนดู
-- CORS อ่านจาก .env (CORS_ALLOW_ORIGINS=comma-separated)
-"""
-
+# CameraServer.py
 import os, cv2, glob, stat, time, atexit, signal, threading
+import numpy as np
 from datetime import datetime
-from typing import Optional, Tuple, List
+from typing import Optional, List
 from flask import Flask, Response, jsonify, request, stream_with_context, make_response, send_from_directory
 
 # ---------- .env (CORS) ----------
@@ -36,9 +26,11 @@ CORS_ALLOW_ORIGINS = _parse_origins(os.environ.get("CORS_ALLOW_ORIGINS")) or [
 # ---------- Config ----------
 HOST, PORT, DEBUG = "0.0.0.0", 8080, False
 JPEG_QUALITY = 80
-UVC_W, UVC_H, UVC_FPS = 1920, 1080, 60.0
+UVC_W, UVC_H, UVC_FPS = 1280, 720, 60.0
 GPHOTO_FPS = 60.0
 WATCH_INTERVAL = 1.0
+FRAME_TIMEOUT_S = 1.0
+FIRST_FRAME_DEADLINE_MS = 300
 
 # ---------- App / State ----------
 app = Flask(__name__)
@@ -47,6 +39,13 @@ app = Flask(__name__)
 buf_lock = threading.Lock()
 latest_jpeg: Optional[bytes] = None
 latest_ver = 0
+
+frame_event = threading.Event()
+
+# capture anti-double
+capture_lock = threading.Lock()
+last_capture_id = 0
+last_captured_path = None
 
 # control flags
 pause_live = False
@@ -64,10 +63,8 @@ gphoto_thread = None
 gphoto_running = False
 gphoto_selected_port: Optional[str] = None
 gphoto_last_error: Optional[str] = None
-
-# DSLR singletons
-gphoto_cam = None                 # live thread owns this
-gphoto_cam_lock = threading.RLock()  # serialize preview/capture on the single cam
+gphoto_cam = None                 # live thread owns camera
+gphoto_cam_lock = threading.RLock()
 
 # probe state (only by watcher/boot)
 last_probe = {"engine": None, "ok": False, "why": "not-probed", "details": {}, "time": None}
@@ -82,7 +79,44 @@ starting_live = threading.Event()
 SAVE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "captured_images"))
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+
+
 # ---------- Utils ----------
+DELETE_RECENT_AFTER_UPLOAD = (os.environ.get("DELETE_RECENT_AFTER_UPLOAD", "false").lower() in ("1","true","yes"))
+try:
+    DELETE_RECENT_COUNT = max(1, int(os.environ.get("DELETE_RECENT_COUNT","2")))
+except Exception:
+    DELETE_RECENT_COUNT = 2
+
+def _list_captured_sorted():
+    """Return list of absolute file paths in SAVE_DIR sorted by mtime desc (newest first)."""
+    files = []
+    try:
+        for p in sorted(glob.glob(os.path.join(SAVE_DIR, "*")), key=lambda x: os.path.getmtime(x), reverse=True):
+            if os.path.isfile(p):
+                files.append(p)
+    except Exception:
+        pass
+    return files
+
+def _safe_delete(paths):
+    """Delete files only if they are inside SAVE_DIR."""
+    deleted, failed = [], []
+    for p in paths:
+        try:
+            ap = os.path.abspath(p)
+            if not ap.startswith(SAVE_DIR + os.sep):
+                failed.append({"path": p, "error": "outside-save-dir"})
+                continue
+            if os.path.exists(ap):
+                os.remove(ap)
+                deleted.append(ap)
+            else:
+                failed.append({"path": p, "error": "not-found"})
+        except Exception as e:
+            failed.append({"path": p, "error": str(e)})
+    return deleted, failed
+
 def log(msg: str): print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def _nocache(resp):
@@ -108,17 +142,29 @@ def root():
     if request.method=="OPTIONS": return _apply_cors(make_response(("",204)))
     return jsonify({"ok":True,"service":"CameraServer","time":datetime.now().isoformat()}),200
 
-def _set_latest(b: bytes):
-    global latest_jpeg, latest_ver
-    with buf_lock:
-        latest_jpeg = b; latest_ver += 1
-
 def _enc(frame):
     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
     return buf.tobytes() if ok else None
 
+def _black_jpeg(width=640, height=480):
+    try:
+        img = np.zeros((height, width, 3), dtype=np.uint8)
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        return buf.tobytes() if ok else None
+    except Exception:
+        return None
+
+def _black_frame_jpeg(width=640, height=480):
+    return _black_jpeg(width, height)
+
+def _set_latest(b: bytes):
+    global latest_jpeg, latest_ver
+    with buf_lock:
+        latest_jpeg = b; latest_ver += 1
+    try: frame_event.set()
+    except Exception: pass
+
 def _free_usb_claimers(port_hint=""):
-    # ใช้ -f เพื่อชื่อยาว และเงียบ stderr
     os.system("pkill -9 -f gvfs-gphoto2-volume-monitor 2>/dev/null")
     os.system("pkill -9 -f gphoto2 2>/dev/null")
     os.system("pkill -9 -f kdeconnectd 2>/dev/null")
@@ -184,10 +230,10 @@ def uvc_worker():
         log("[UVC] live open failed from last caps"); uvc_running=False; return
     interval=1.0/max(1.0,float(UVC_FPS)); nxt=time.time()
     while uvc_running:
-        if pause_live: time.sleep(0.03); continue
+        if pause_live: time.sleep(0.02); continue
         ret,frame=cap.read()
         if not ret or frame is None:
-            time.sleep(0.05); continue
+            time.sleep(0.02); continue
         b=_enc(frame); 
         if b: _set_latest(b)
         nxt+=interval; d=nxt-time.time()
@@ -260,6 +306,26 @@ def _cold_probe_gphoto():
 def _detect_engine() -> str:
     return ENGINE_GPHOTO if (gp and _gphoto_list()) else ENGINE_UVC
 
+def _gphoto_set_liveview(cam, enabled: bool):
+    try:
+        cfg = cam.get_config()
+        for key in ['viewfinder','liveview','eosviewfinder','movie']:
+            try:
+                node = cfg.get_child_by_name(key)
+                if not node: continue
+                if node.get_type() == gp.GP_WIDGET_TOGGLE:
+                    node.set_value(1 if enabled else 0)
+                    cam.set_config(cfg)
+                    return True
+                elif node.get_type() == gp.GP_WIDGET_RADIO and node.count_choices():
+                    choice = node.get_choice(0 if enabled else min(1, node.count_choices()-1))
+                    node.set_value(choice); cam.set_config(cfg); return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
 def gphoto_worker():
     global gphoto_running, gphoto_cam, gphoto_last_error
     log("[GPHOTO] live started")
@@ -273,24 +339,17 @@ def gphoto_worker():
         _gphoto_set_port(cam,port); time.sleep(0.2); cam.init()
         # enable liveview only for live usage
         try:
-            cfg=cam.get_config()
-            for key in ['viewfinder','liveview','eosviewfinder','movie']:
-                try:
-                    node=cfg.get_child_by_name(key)
-                    if node:
-                        if node.get_type()==gp.GP_WIDGET_TOGGLE: node.set_value(1); cam.set_config(cfg); break
-                        elif node.get_type()==gp.GP_WIDGET_RADIO and node.count_choices(): node.set_value(node.get_choice(0)); cam.set_config(cfg); break
-                except Exception: pass
+            _gphoto_set_liveview(cam, True)
         except Exception: pass
         with gphoto_cam_lock:
             gphoto_cam=cam
         frame_interval=1.0/max(1.0,float(GPHOTO_FPS)); nxt=time.monotonic()+frame_interval
         while gphoto_running:
             if pause_live:
-                time.sleep(0.03); continue
+                time.sleep(0.02); continue
             now=time.monotonic()
             if now<nxt:
-                time.sleep(min(0.01,nxt-now)); continue
+                time.sleep(min(0.008,nxt-now)); continue
             nxt=now+frame_interval
             try:
                 with gphoto_cam_lock:
@@ -301,7 +360,7 @@ def gphoto_worker():
                 if b and b[:2]==b'\xff\xd8': _set_latest(b)
             except Exception as e:
                 gphoto_last_error=f"preview: {e}"
-                time.sleep(0.1)
+                time.sleep(0.05)
     except gp.GPhoto2Error as e:
         gphoto_last_error=f"init: {e}"
     finally:
@@ -354,12 +413,11 @@ def watcher_loop():
     _perform_cold_probe_and_record()
     while watcher_running:
         try:
-            if starting_live.is_set(): time.sleep(0.3); continue
+            if starting_live.is_set(): time.sleep(0.25); continue
             a=_snapshot_uvc(); b=_snapshot_gphoto()
             if a!=_last_seen_uvc or b!=_last_seen_gphoto_ports:
                 _last_seen_uvc=a; _last_seen_gphoto_ports=b
                 _perform_cold_probe_and_record()
-                # sync live to current engine (no re-probe)
                 if viewers>0 and not pause_live:
                     if current_engine==ENGINE_GPHOTO: stop_uvc_live(); start_gphoto_live()
                     else: stop_gphoto_live(); start_uvc_live()
@@ -459,78 +517,161 @@ def reset_camera():
     _perform_cold_probe_and_record()
     return jsonify({"ok":True,"reset":True}),200
 
-# ---------- API: capture ----------
+# ---------- Helper: ensure first frame ASAP ----------
+def _ensure_first_frame_ready(deadline_ms=FIRST_FRAME_DEADLINE_MS):
+    t0 = time.time()
+    # already have frame?
+    with buf_lock:
+        if latest_jpeg:
+            return True
+    # wait a bit for live thread to deliver a frame
+    while (time.time() - t0) * 1000 < deadline_ms:
+        with buf_lock:
+            if latest_jpeg:
+                return True
+        time.sleep(0.01)
+    # still empty -> try open-once fast path
+    if current_engine == ENGINE_UVC or not gp:
+        ok, _, _ = _cold_probe_uvc()
+        return ok
+    else:
+        # DSLR: if live cam exists, ask one preview frame quickly
+        if gphoto_cam is not None:
+            try:
+                with gphoto_cam_lock:
+                    cf = gphoto_cam.capture_preview()
+                    import gphoto2 as gp2
+                    data = gp2.check_result(gp2.gp_file_get_data_and_size(cf))
+                b = memoryview(data).tobytes()
+                if b and b[:2] == b'\xff\xd8':
+                    _set_latest(b)
+                    return True
+            except Exception:
+                pass
+        return False
+
+# ---------- API: capture (anti double + freshest buffer) ----------
 @app.route("/capture", methods=["POST"])
 def capture():
-    """
-    DSLR: ใช้กล้องเดียวกับ live ผ่าน gphoto_cam_lock -> ไม่มี claim ซ้ำ
-    UVC: ใช้เฟรมล่าสุด; ถ้าไม่มี live ให้เปิดเฉพาะกิจ 1 เฟรม
-    """
-    # DSLR path (if engine says DSLR and gphoto is present)
-    if gp and current_engine==ENGINE_GPHOTO:
-        # ใช้กล้องที่ live ถืออยู่ (single-owner)
-        with gphoto_cam_lock:
-            if gphoto_cam is None:
-                return jsonify({"ok":False,"error":"DSLR not ready"}),503
-            try:
-                fp=gphoto_cam.capture(gp.GP_CAPTURE_IMAGE)
-                folder,name=fp.folder,fp.name
-                cf=gphoto_cam.file_get(folder,name,gp.GP_FILE_TYPE_NORMAL)
-                mime=cf.get_mime_type()
-                ts=datetime.now().strftime("%Y%m%d_%H%M%S")
-                import mimetypes
-                ext=mimetypes.guess_extension(mime) or ".jpg"
-                out=os.path.join(SAVE_DIR,f"capture_{ts}{ext}")
-                cf.save(out)
-                try: gphoto_cam.file_delete(folder,name)
-                except Exception: pass
+    global last_capture_id, last_captured_path
+
+    # anti double-capture
+    if not capture_lock.acquire(blocking=False):
+        return jsonify({"ok": False, "error": "busy: capture in progress"}), 429
+
+    try:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # DSLR
+        if gp and current_engine == ENGINE_GPHOTO:
+            with gphoto_cam_lock:
+                if gphoto_cam is None:
+                    return jsonify({"ok": False, "error": "DSLR not ready"}), 503
                 try:
-                    with open(out,"rb") as f: b=f.read()
-                    if b[:2]==b'\xff\xd8': _set_latest(b)
-                except Exception: pass
-                return jsonify({"ok":True,"serverPath":out,"url":f"/captured_images/{os.path.basename(out)}"}),200
-            except gp.GPhoto2Error as e:
-                return jsonify({"ok":False,"error":f"capture failed: {e}"}),500
+                    # --- ปิด liveview ชั่วคราว เพื่อให้ capture เต็มเซนเซอร์ ---
+                    _gphoto_set_liveview(gphoto_cam, False)
+                    fp = gphoto_cam.capture(gp.GP_CAPTURE_IMAGE)
+                    folder, name = fp.folder, fp.name
+                    cf = gphoto_cam.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)
+                    mime = cf.get_mime_type()
+                    import mimetypes
+                    ext = mimetypes.guess_extension(mime) or ".jpg"
+                    out = os.path.join(SAVE_DIR, f"capture_{ts}{ext}")
+                    cf.save(out)
+                    try: gphoto_cam.file_delete(folder, name)
+                    except Exception: pass
 
-    # UVC path
-    with buf_lock:
-        b=latest_jpeg
-    if b:
-        ts=datetime.now().strftime("%Y%m%d_%H%M%S")
-        out=os.path.join(SAVE_DIR,f"capture_{ts}.jpg")
-        try:
-            with open(out,"wb") as f: f.write(b)
-            return jsonify({"ok":True,"serverPath":out,"url":f"/captured_images/{os.path.basename(out)}"}),200
-        except Exception as e:
-            return jsonify({"ok":False,"error":str(e)}),500
+                    # --- เปิด liveview กลับ เพื่อให้ preview ทำงานต่อเนื่อง ---
+                    _gphoto_set_liveview(gphoto_cam, True)
 
-    # ไม่มี live → ดึง 1 เฟรมเฉพาะกิจ (ไม่ใช่การ probe ระบบ)
-    ok,why,det=_cold_probe_uvc()
-    if not ok:
-        return jsonify({"ok":False,"error":f"open-once failed: {why}"}),503
-    with buf_lock:
-        b=latest_jpeg
-    if not b: return jsonify({"ok":False,"error":"no frame"}),503
-    ts=datetime.now().strftime("%Y%m%d_%H%M%S")
-    out=os.path.join(SAVE_DIR,f"capture_{ts}.jpg")
-    with open(out,"wb") as f: f.write(b)
-    return jsonify({"ok":True,"serverPath":out,"url":f"/captured_images/{os.path.basename(out)}"}),200
+                    with open(out, "rb") as f:
+                        data = f.read()
+                    if data[:2] == b'\xff\xd8':
+                        _set_latest(data)
+                    last_captured_path = out
+                    last_capture_id += 1
+                    return jsonify({"ok": True, "serverPath": out,
+                                    "url": f"/captured_images/{os.path.basename(out)}",
+                                    "capture_id": last_capture_id}), 200
+                except gp.GPhoto2Error as e:
+                    return jsonify({"ok": False, "error": f"capture failed: {e}"}), 500
+
+        # UVC
+        with buf_lock:
+            data = latest_jpeg
+        if not data:
+            ok, why, _ = _cold_probe_uvc()
+            if not ok:
+                return jsonify({"ok": False, "error": f"open-once failed: {why}"}), 503
+            with buf_lock:
+                data = latest_jpeg
+            if not data:
+                return jsonify({"ok": False, "error": "no frame"}), 503
+
+        out = os.path.join(SAVE_DIR, f"capture_{ts}.jpg")
+        with open(out, "wb") as f:
+            f.write(data)
+
+        # refresh buffer from saved file to avoid stale frame
+        with open(out, "rb") as f:
+            _set_latest(f.read())
+        last_captured_path = out
+        last_capture_id += 1
+        return jsonify({"ok": True, "serverPath": out,
+                        "url": f"/captured_images/{os.path.basename(out)}",
+                        "capture_id": last_capture_id}), 200
+
+    finally:
+        capture_lock.release()
+
+@app.route("/api/delete_recent", methods=["POST"])
+def api_delete_recent():
+    # guard เปิด/ปิดจาก .env
+    if not DELETE_RECENT_AFTER_UPLOAD:
+        return jsonify({"ok": False, "error": "disabled-by-config"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    # จำนวนรูปที่จะลบ รับจาก body.count หรือ query ?count=
+    try:
+        count = int(request.args.get("count", payload.get("count", DELETE_RECENT_COUNT)))
+        count = max(1, min(count, 20))  # กันค่าเกิน
+    except Exception:
+        count = DELETE_RECENT_COUNT
+
+    files = _list_captured_sorted()[:count]
+    deleted, failed = _safe_delete(files)
+    return jsonify({
+        "ok": True,
+        "requested": count,
+        "deleted": deleted,
+        "failed": failed,
+        "dir": SAVE_DIR,
+    }), 200
 
 @app.route('/captured_images/<path:filename>')
 def serve_captured_image(filename):
     resp=send_from_directory(SAVE_DIR,filename)
     return _nocache(resp)
 
-# ---------- MJPEG ----------
+# ---------- MJPEG (Fast First Frame + event-driven) ----------
 @app.route("/video_feed")
 def video_feed():
     """
-    ไม่ส่ง 410 เพื่อกันเบราว์เซอร์รีทราย; จะรอ/ส่งเฟรมล่าสุดแทน
+    Fast first frame: ส่งเฟรมล่าสุดทันที; ถ้าไม่มี พยายามให้ได้ภายใน ~300ms,
+    ไม่ได้จริง ๆ ส่ง black frame ให้ขึ้นก่อน แล้วเฟรมจริงตามมา
     """
-    global viewers
+    global viewers, pause_live
     viewers += 1
 
-    # start live according to last probe result (without re-probe)
+    # autoconfirm: ให้ client ปลด pause ได้ตั้งแต่ GET ครั้งแรก
+    try:
+        ac = request.args.get("autoconfirm", "0").lower()
+        if ac in ("1","true","yes"):
+            pause_live = False
+    except Exception:
+        pass
+
+    # start live according to last probe result
     if _detect_engine()==ENGINE_GPHOTO:
         stop_uvc_live(); start_gphoto_live()
     else:
@@ -538,32 +679,41 @@ def video_feed():
 
     def generate():
         global viewers
-        last_v=-1
-        # เลือก FPS ตาม engine ที่รัน
-        send_fps = GPHOTO_FPS if (gphoto_thread and gphoto_thread.is_alive()) else UVC_FPS
-        interval=1.0/max(1.0,float(send_fps)); nxt=time.monotonic()
-        try:
-            while True:
-                now=time.monotonic()
-                if now<nxt:
-                    time.sleep(min(0.005,nxt-now)); continue
-                nxt=now+interval
-                with buf_lock:
-                    frame=latest_jpeg; v=latest_ver
-                if not frame or v==last_v:
-                    # ถ้า paused หรือยังไม่มีเฟรม ให้ส่ง noop chunk (ค้างสตรีมไว้ ไม่ปิด)
-                    time.sleep(0.02); continue
-                last_v=v
-                headers=(b'Content-Type: image/jpeg\r\n'+
-                         b'Content-Length: '+str(len(frame)).encode('ascii')+b'\r\n\r\n')
-                yield b'--frame\r\n'+headers+frame+b'\r\n'
-        finally:
-            viewers=max(0,viewers-1)
-            if viewers==0:
-                stop_gphoto_live(); stop_uvc_live()
+        last_v = -1
 
-    resp=Response(stream_with_context(generate()), mimetype='multipart/x-mixed-replace; boundary=frame')
-    resp.headers["X-Accel-Buffering"]="no"
+        # --- first frame path ---
+        with buf_lock:
+            frame = latest_jpeg
+            v = latest_ver
+        if frame is None:
+            _ensure_first_frame_ready(FIRST_FRAME_DEADLINE_MS)
+            with buf_lock:
+                frame = latest_jpeg
+                v = latest_ver
+        if frame is None:
+            # ส่ง black frame fallback ถ้ายังไม่มี
+            frame = _black_frame_jpeg()
+
+        yield (b"--frame\r\n"
+               b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+
+        # --- streaming loop ---
+        while True:
+            frame_event.wait(timeout=1.0)
+            with buf_lock:
+                nf = latest_jpeg
+                nv = latest_ver
+            if nf is not None and nv != last_v:
+                last_v = nv
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + nf + b"\r\n")
+
+    resp = Response(generate(),
+                    mimetype="multipart/x-mixed-replace; boundary=frame")
+    @resp.call_on_close
+    def _dec_view():
+        global viewers
+        viewers = max(0, viewers-1)
     return resp
 
 # ---------- Lifecycle ----------
@@ -583,5 +733,11 @@ atexit.register(_graceful_shutdown)
 if __name__=="__main__":
     log(f"[BOOT] CameraServer starting at {HOST}:{PORT}")
     log(f"[BOOT] CORS_ALLOW_ORIGINS={CORS_ALLOW_ORIGINS}")
+    # start watcher → cold-probe ครั้งแรก + รอ hot-plug ต่อไป
+    def start_watcher():
+        global watcher_thread, watcher_running
+        if watcher_thread and watcher_thread.is_alive(): return
+        watcher_running=True
+        watcher_thread=threading.Thread(target=watcher_loop,daemon=True); watcher_thread.start()
     start_watcher()
     app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True)
