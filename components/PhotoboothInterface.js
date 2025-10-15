@@ -70,6 +70,10 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const [liveLoading, setLiveLoading] = useState(true);
   const liveImgRef = useRef(null);
 
+  // ให้ Loader ค้างครอบแบล็คเฟรมสักครู่ (เพื่อกันกระพริบ)
+  const suppressOnLoadUntil = useRef(0);
+  const HOLD_MS = 800;
+
   // Fit mode for <img> (kept as in your UI)
   const [fitMode, setFitMode] = useState("cover");
   const objectClass = useMemo(
@@ -84,10 +88,12 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const baseDelay = 900;
   const jitter = () => Math.random() * 300;
 
-  const makeLiveUrl = () => {
+  // ใช้ fresh=1 ทุกครั้งที่เริ่ม/สลับ live เพื่อบังคับแบล็คเฟรมแทนเฟรมค้าง
+  const makeLiveUrl = (fresh = false) => {
     if (!CAMERA_BASE) return null;
     const ts = Date.now();
-    return `${CAMERA_BASE}/video_feed?autoconfirm=1&session=${SESSION_KEY}&ts=${ts}`;
+    const f = fresh ? "&fresh=1" : "";
+    return `${CAMERA_BASE}/video_feed?autoconfirm=1&session=${SESSION_KEY}${f}&ts=${ts}`;
   };
 
   const resetRetry = () => {
@@ -101,10 +107,12 @@ export default function PhotoboothInterface({ user, onLogout }) {
     retryRef.current.timer = setTimeout(() => {
       if (capturedImage || redirecting || busy || photosTaken >= MAX_PHOTOS) return;
       retryRef.current.tries = Math.min(retryRef.current.tries + 1, MAX_RETRY);
-      const url = makeLiveUrl();
+      const url = makeLiveUrl(true); // <<<< ใช้ fresh=1 เสมอ
       if (url) {
-        liveStartAtRef.current = Date.now(); // จำเวลาสลับสตรีม
+        suppressOnLoadUntil.current = Date.now() + HOLD_MS; // ค้าง Loader ทับแบล็คเฟรม
+        liveStartAtRef.current = Date.now();
         setLiveSrc(url);
+        setLiveLoading(true);
       }
     }, delay + jitter());
   };
@@ -127,11 +135,11 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
           if (!h?.running || h?.paused) {
             await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
-            reloadLive(450);
+            reloadLive(450); // จะเรียก fresh=1 ภายใน
           }
         } catch {
           fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
-          reloadLive(1200);
+          reloadLive(1200); // จะเรียก fresh=1 ภายใน
         }
       };
 
@@ -181,9 +189,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
   initLiveFirstTime.current = async () => {
     setLiveLoading(true);
     resetRetry();
-
-    const url = makeLiveUrl();
+    const url = makeLiveUrl(true);
     if (url) {
+      suppressOnLoadUntil.current = Date.now() + HOLD_MS; // ให้ Loader ค้างครอบแบล็คเฟรมช่วงสั้น ๆ
       liveStartAtRef.current = Date.now();
       setLiveSrc(url);
     }
@@ -208,14 +216,20 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   // ===== Handlers for live <img> =====
   const onLiveLoad = () => {
-    setLiveLoading(false);
+    // หน่วงปิด Loader ให้เลยช่วงแบล็คเฟรม
+    const now = Date.now();
+    if (now >= suppressOnLoadUntil.current) {
+      setLiveLoading(false);
+    } else {
+      setTimeout(() => setLiveLoading(false), suppressOnLoadUntil.current - now);
+    }
     resetRetry();
   };
   const onLiveError = () => {
     setLiveLoading(false);
     const tries = retryRef.current.tries;
     const nextDelay = Math.min(baseDelay * (1 + tries), 3000);
-    reloadLive(nextDelay);
+    reloadLive(nextDelay); // รีทรายแบบ fresh=1
   };
 
   // ===== Photo flow: overlay -> countdown -> capture =====
@@ -234,10 +248,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
         if (count > 0) setCountdown(count);
         else {
           setCountdown("📸");
-          setTimeout(() => {
-            setCountdown(null);
-            handleCapture();
-          }, 500);
+          setCountdown(null);
+          handleCapture();
           clearInterval(timer);
         }
       }, 1000);
@@ -375,17 +387,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
         return;
       }
 
-      // Not finished yet -> back to live
+      // เริ่ม live ใหม่ (fresh=1) เพื่อถ่ายภาพต่อ
       if (CAMERA_BASE) {
         const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(
           () => null
         );
-        let nextLive = makeLiveUrl();
+        let nextLive = makeLiveUrl(true);
         if (r && r.ok) {
           const data = await r.json().catch(() => ({}));
           if (data?.video) nextLive = `${CAMERA_BASE}${data.video}?ts=${Date.now()}`;
         }
         setLiveLoading(true);
+        suppressOnLoadUntil.current = Date.now() + HOLD_MS;
         liveStartAtRef.current = Date.now();
         setLiveSrc(nextLive);
       }
@@ -408,7 +421,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
         const r = await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(
           () => null
         );
-        let nextLive = makeLiveUrl();
+        let nextLive = makeLiveUrl(true);
         if (r && r.ok) {
           try {
             const data = await r.json();
@@ -417,6 +430,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
           } catch {}
         }
         liveStartAtRef.current = Date.now();
+        suppressOnLoadUntil.current = Date.now() + HOLD_MS;
         setLiveSrc(nextLive);
       }
     } finally {
