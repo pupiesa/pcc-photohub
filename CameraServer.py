@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# CameraServer.py
+# CameraServer.py — Fast‑Wake + Reconnect + Pre‑Arm DSLR for near zero‑lag
 import os, cv2, glob, stat, time, atexit, signal, threading
 import numpy as np
 from datetime import datetime
@@ -79,8 +79,6 @@ starting_live = threading.Event()
 SAVE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "captured_images"))
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-
-
 # ---------- Utils ----------
 DELETE_RECENT_AFTER_UPLOAD = (os.environ.get("DELETE_RECENT_AFTER_UPLOAD", "false").lower() in ("1","true","yes"))
 try:
@@ -88,8 +86,12 @@ try:
 except Exception:
     DELETE_RECENT_COUNT = 2
 
+# Pre‑arm window (ms) — if /api/prepare_shot was called recently, skip DSLR toggle‑off to reduce lag
+prearmed_until_ms = 0
+prearm_lock = threading.Lock()
+
+
 def _list_captured_sorted():
-    """Return list of absolute file paths in SAVE_DIR sorted by mtime desc (newest first)."""
     files = []
     try:
         for p in sorted(glob.glob(os.path.join(SAVE_DIR, "*")), key=lambda x: os.path.getmtime(x), reverse=True):
@@ -99,8 +101,8 @@ def _list_captured_sorted():
         pass
     return files
 
+
 def _safe_delete(paths):
-    """Delete files only if they are inside SAVE_DIR."""
     deleted, failed = [], []
     for p in paths:
         try:
@@ -117,34 +119,41 @@ def _safe_delete(paths):
             failed.append({"path": p, "error": str(e)})
     return deleted, failed
 
+
 def log(msg: str): print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+
 
 def _nocache(resp):
     resp.headers["Cache-Control"]="no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"]="no-cache"; resp.headers["Expires"]="0"
     return resp
 
+
 def _apply_cors(resp):
     origin = request.headers.get("Origin","").rstrip("/")
     if origin and origin in CORS_ALLOW_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"]=origin
-        resp.headers["Vary"]="Origin"
-        resp.headers["Access-Control-Allow-Credentials"]="true"
-        resp.headers["Access-Control-Allow-Headers"]="Content-Type, Authorization, X-Requested-With"
-        resp.headers["Access-Control-Allow-Methods"]="GET, POST, OPTIONS"
+        resp.headers["Vary"]= "Origin"
+        resp.headers["Access-Control-Allow-Credentials"]= "true"
+        resp.headers["Access-Control-Allow-Headers"]= "Content-Type, Authorization, X-Requested-With"
+        resp.headers["Access-Control-Allow-Methods"]= "GET, POST, OPTIONS"
     return resp
+
 
 @app.after_request
 def _after(resp): return _apply_cors(_nocache(resp))
+
 
 @app.route("/", methods=["GET","OPTIONS"])
 def root():
     if request.method=="OPTIONS": return _apply_cors(make_response(("",204)))
     return jsonify({"ok":True,"service":"CameraServer","time":datetime.now().isoformat()}),200
 
+
 def _enc(frame):
     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
     return buf.tobytes() if ok else None
+
 
 def _black_jpeg(width=640, height=480):
     try:
@@ -154,8 +163,10 @@ def _black_jpeg(width=640, height=480):
     except Exception:
         return None
 
+
 def _black_frame_jpeg(width=640, height=480):
     return _black_jpeg(width, height)
+
 
 def _set_latest(b: bytes):
     global latest_jpeg, latest_ver
@@ -163,6 +174,7 @@ def _set_latest(b: bytes):
         latest_jpeg = b; latest_ver += 1
     try: frame_event.set()
     except Exception: pass
+
 
 def _clear_latest():
     global latest_jpeg, latest_ver
@@ -174,6 +186,7 @@ def _clear_latest():
     except Exception:
         pass
 
+
 def _free_usb_claimers(port_hint=""):
     os.system("pkill -9 -f gvfs-gphoto2-volume-monitor 2>/dev/null")
     os.system("pkill -9 -f gphoto2 2>/dev/null")
@@ -182,14 +195,17 @@ def _free_usb_claimers(port_hint=""):
         bus, dev = port_hint.replace("usb:","").split(",",1)
         os.system(f"sudo umount /dev/bus/usb/{bus}/{dev} 2>/dev/null || true")
 
-# ---------- UVC: cold-probe + live ----------
-def _list_v4l2(): 
+# ---------- UVC helpers (unchanged logic) ----------
+# ... (same as before) ...
+
+def _list_v4l2():
     out=[]
     for d in sorted(glob.glob("/dev/video*")):
         try:
             if stat.S_ISCHR(os.stat(d).st_mode): out.append(d)
         except Exception: pass
     return out
+
 
 def _first_uvc_idx():
     for d in _list_v4l2():
@@ -201,6 +217,7 @@ def _first_uvc_idx():
         except: pass
         if ok: return idx
     return None
+
 
 def _cold_probe_uvc():
     idx=_first_uvc_idx()
@@ -215,12 +232,13 @@ def _cold_probe_uvc():
     try: cap.release()
     except: pass
     if not ret or frame is None: return False,"no-frame",{"index":idx,"actual":{"w":actual[0],"h":actual[1],"fps":actual[2]}}
-    b=_enc(frame); 
+    b=_enc(frame);
     if b: _set_latest(b)
     return True,"ok",{"index":idx,"actual":{"w":actual[0],"h":actual[1],"fps":actual[2]}}
 
+
 def _open_uvc_from_caps(caps):
-    idx=caps.get("index"); 
+    idx=caps.get("index");
     if idx is None: return None
     cap=cv2.VideoCapture(idx)
     if not cap or not cap.isOpened(): return None
@@ -230,6 +248,7 @@ def _open_uvc_from_caps(caps):
         try: cap.set(cv2.CAP_PROP_FPS,caps["actual"]["fps"])
         except: pass
     return cap
+
 
 def uvc_worker():
     global uvc_running
@@ -244,7 +263,7 @@ def uvc_worker():
         ret,frame=cap.read()
         if not ret or frame is None:
             time.sleep(0.02); continue
-        b=_enc(frame); 
+        b=_enc(frame);
         if b: _set_latest(b)
         nxt+=interval; d=nxt-time.time()
         if d>0: time.sleep(d)
@@ -252,6 +271,7 @@ def uvc_worker():
     try: cap.release()
     except: pass
     log("[UVC] live stopped")
+
 
 def start_uvc_live():
     global uvc_thread, uvc_running
@@ -261,6 +281,7 @@ def start_uvc_live():
     uvc_thread=threading.Thread(target=uvc_worker,daemon=True); uvc_thread.start()
     threading.Timer(1.0, starting_live.clear).start()
 
+
 def stop_uvc_live():
     global uvc_thread, uvc_running
     if uvc_thread and uvc_thread.is_alive():
@@ -269,10 +290,10 @@ def stop_uvc_live():
         except: pass
     uvc_thread=None
 
+
 def _start_live_for_current_engine():
     global current_engine
     if current_engine is None:
-        # make sure we know what engine to use on first run
         try:
             _perform_cold_probe_and_record()
         except Exception:
@@ -289,11 +310,12 @@ def _start_live_for_current_engine():
     except Exception:
         pass
 
-# ---------- gphoto: cold-probe + single-owner live/capture ----------
+# ---------- gphoto ----------
 try:
     import gphoto2 as gp
 except Exception:
     gp=None
+
 
 def _gphoto_list():
     if not gp: return []
@@ -301,11 +323,13 @@ def _gphoto_list():
     except Exception as e:
         log(f"[GPHOTO] autodetect failed: {e}"); return []
 
+
 def _gphoto_set_port(cam, port):
     pil=gp.PortInfoList(); pil.load()
     idx=pil.lookup_path(port)
     if idx<0: raise gp.GPhoto2Error(gp.GP_ERROR_BAD_PARAMETERS)
     cam.set_port_info(pil[idx])
+
 
 def _cold_probe_gphoto():
     cams=_gphoto_list()
@@ -333,8 +357,10 @@ def _cold_probe_gphoto():
         except: pass
         return False,f"init failed: {e}",{"port":port}
 
+
 def _detect_engine() -> str:
     return ENGINE_GPHOTO if (gp and _gphoto_list()) else ENGINE_UVC
+
 
 def _gphoto_set_liveview(cam, enabled: bool):
     try:
@@ -356,6 +382,7 @@ def _gphoto_set_liveview(cam, enabled: bool):
         pass
     return False
 
+
 def gphoto_worker():
     global gphoto_running, gphoto_cam, gphoto_last_error
     log("[GPHOTO] live started")
@@ -367,7 +394,6 @@ def gphoto_worker():
         cam=gp.Camera()
         _free_usb_claimers(port)
         _gphoto_set_port(cam,port); time.sleep(0.2); cam.init()
-        # enable liveview only for live usage
         try:
             _gphoto_set_liveview(cam, True)
         except Exception: pass
@@ -402,6 +428,7 @@ def gphoto_worker():
         log("[GPHOTO] live stopped")
         gphoto_running=False
 
+
 def start_gphoto_live():
     global gphoto_thread, gphoto_running
     if not gp: return
@@ -411,6 +438,7 @@ def start_gphoto_live():
     gphoto_thread=threading.Thread(target=gphoto_worker,daemon=True); gphoto_thread.start()
     threading.Timer(1.0, starting_live.clear).start()
 
+
 def stop_gphoto_live():
     global gphoto_thread, gphoto_running
     if gphoto_thread and gphoto_thread.is_alive():
@@ -419,11 +447,14 @@ def stop_gphoto_live():
         except: pass
     gphoto_thread=None
 
-# ---------- Watcher: boot/hot-plug probe only ----------
+# ---------- Watcher ----------
+
 def _snapshot_uvc(): return set(_list_v4l2())
-def _snapshot_gphoto(): 
+
+def _snapshot_gphoto():
     cams=_gphoto_list() if gp else []
     return set([p for _,p in cams])
+
 
 def _perform_cold_probe_and_record():
     global last_probe, current_engine
@@ -435,6 +466,7 @@ def _perform_cold_probe_and_record():
     last_probe={"engine":eng,"ok":ok,"why":why,"details":det,"time":datetime.now().isoformat()}
     current_engine=eng
     log(f"[PROBE] {eng} ok={ok} why={why}")
+
 
 def watcher_loop():
     global watcher_running,_last_seen_uvc,_last_seen_gphoto_ports
@@ -456,11 +488,13 @@ def watcher_loop():
         time.sleep(WATCH_INTERVAL)
     log("[WATCHER] stopped")
 
+
 def start_watcher():
     global watcher_thread, watcher_running
     if watcher_thread and watcher_thread.is_alive(): return
     watcher_running=True
     watcher_thread=threading.Thread(target=watcher_loop,daemon=True); watcher_thread.start()
+
 
 def stop_watcher():
     global watcher_thread, watcher_running
@@ -486,6 +520,7 @@ def api_health():
         "time": datetime.now().isoformat(),
     }), 200
 
+
 @app.route("/api/devices")
 def api_devices():
     cams=_gphoto_list() if gp else []
@@ -505,11 +540,13 @@ def pause():
     pause_live=True
     return jsonify({"ok":True,"paused":True}),200
 
+
 @app.route("/resume", methods=["POST"])
 def resume():
     global pause_live
     pause_live=False
     return jsonify({"ok":True,"resumed":True}),200
+
 
 @app.route("/stop_stream", methods=["POST"])
 @app.route("/stop", methods=["POST"])
@@ -518,6 +555,7 @@ def stop_stream():
     pause_live=True
     stop_gphoto_live(); stop_uvc_live()
     return jsonify({"ok":True,"stopped":True,"paused":True}),200
+
 
 @app.route("/confirm", methods=["POST"])
 def confirm():
@@ -532,6 +570,7 @@ def cameras():
     return jsonify({"cameras":[{"model":m,"port":p} for (m,p) in cams],
                     "selected_port": gphoto_selected_port}),200
 
+
 @app.route("/set_camera", methods=["POST","GET"])
 def set_camera():
     global gphoto_selected_port
@@ -541,52 +580,85 @@ def set_camera():
     _perform_cold_probe_and_record()
     return jsonify({"ok":True,"selected_port":gphoto_selected_port}),200
 
+
 @app.route("/reset_camera", methods=["POST"])
 def reset_camera():
     _free_usb_claimers(gphoto_selected_port or "")
     _perform_cold_probe_and_record()
     return jsonify({"ok":True,"reset":True}),200
 
+# ---------- DSLR Wake & Pre‑arm ----------
+
+def _wake_dslr_internal():
+    if not (gp and current_engine == ENGINE_GPHOTO):
+        return False
+    cams = _gphoto_list()
+    if not cams:
+        return False
+    with gphoto_cam_lock:
+        cam = gphoto_cam
+        if cam is None:
+            # try starting live quickly
+            start_gphoto_live()
+            return True
+        try:
+            _gphoto_set_liveview(cam, True)
+            cf = cam.capture_preview()
+            data = gp.check_result(gp.gp_file_get_data_and_size(cf))
+            b = memoryview(data).tobytes()
+            if b and b[:2] == b'\xff\xd8':
+                _set_latest(b)
+            return True
+        except Exception:
+            return False
+
+
+@app.route("/api/wake", methods=["POST","GET"])
+def api_wake():
+    ok = _wake_dslr_internal()
+    return jsonify({"ok": bool(ok)}), 200 if ok else 503
+
+
+@app.route("/api/prepare_shot", methods=["POST"])
+def api_prepare_shot():
+    global prearmed_until_ms
+    now = time.time() * 1000.0
+    with prearm_lock:
+        prearmed_until_ms = now + 4000  # valid for 4s
+    if gp and current_engine == ENGINE_GPHOTO:
+        with gphoto_cam_lock:
+            if gphoto_cam is not None:
+                try:
+                    _gphoto_set_liveview(gphoto_cam, False)  # turn off LV ahead of time
+                except Exception:
+                    pass
+    return jsonify({"ok": True, "prearmed_until": prearmed_until_ms}), 200
+
+
 # ---------- Helper: ensure first frame ASAP ----------
+
 def _ensure_first_frame_ready(deadline_ms=FIRST_FRAME_DEADLINE_MS):
     t0 = time.time()
-    # already have frame?
     with buf_lock:
         if latest_jpeg:
             return True
-    # wait a bit for live thread to deliver a frame
     while (time.time() - t0) * 1000 < deadline_ms:
         with buf_lock:
             if latest_jpeg:
                 return True
         time.sleep(0.01)
-    # still empty -> try open-once fast path
-    if current_engine == ENGINE_UVC or not gp:
-        ok, _, _ = _cold_probe_uvc()
-        return ok
-    else:
-        # DSLR: if live cam exists, ask one preview frame quickly
-        if gphoto_cam is not None:
-            try:
-                with gphoto_cam_lock:
-                    cf = gphoto_cam.capture_preview()
-                    import gphoto2 as gp2
-                    data = gp2.check_result(gp2.gp_file_get_data_and_size(cf))
-                b = memoryview(data).tobytes()
-                if b and b[:2] == b'\xff\xd8':
-                    _set_latest(b)
-                    return True
-            except Exception:
-                pass
-        return False
-      
+    # if not ready, attempt to wake DSLR quickly
+    _wake_dslr_internal()
+    return False
+
+
 def _ms():
     return time.time() * 1000.0
 
 # ---------- API: capture (anti double + freshest buffer) ----------
 @app.route("/capture", methods=["POST"])
 def capture():
-    global last_capture_id, last_captured_path
+    global last_capture_id, last_captured_path, prearmed_until_ms
     if not capture_lock.acquire(blocking=False):
         return jsonify({"ok": False, "error": "busy: capture in progress"}), 429
 
@@ -602,19 +674,21 @@ def capture():
                 t1 = _ms()
                 try:
                     keep_lv = (os.environ.get("DSLR_CAPTURE_KEEP_LV","0").lower() in ("1","true","yes"))
-                    if not keep_lv:
+                    # if pre-armed within window, we already turned LV off → skip extra toggle
+                    prearmed = (_ms() <= prearmed_until_ms)
+                    if not keep_lv and not prearmed:
                         _gphoto_set_liveview(gphoto_cam, False)
                     t2 = _ms()
-                    fp = gphoto_cam.capture(gp.GP_CAPTURE_IMAGE)   # ถ่ายจริง
+                    fp = gphoto_cam.capture(gp.GP_CAPTURE_IMAGE)
                     t3 = _ms()
                     folder, name = fp.folder, fp.name
-                    cf = gphoto_cam.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # ดาวน์โหลดจากกล้อง
+                    cf = gphoto_cam.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)
                     t4 = _ms()
                     mime = cf.get_mime_type()
                     import mimetypes
                     ext = mimetypes.guess_extension(mime) or ".jpg"
                     out = os.path.join(SAVE_DIR, f"capture_{ts}{ext}")
-                    cf.save(out)  # เขียนลงดิสก์
+                    cf.save(out)
                     t5 = _ms()
                     try: gphoto_cam.file_delete(folder, name)
                     except Exception: pass
@@ -627,8 +701,10 @@ def capture():
 
                     last_captured_path = out
                     last_capture_id += 1
+                    with prearm_lock:
+                        prearmed_until_ms = 0  # consumed
 
-                    print(f"[CAPTURE DSLR] total={t7-t0:.0f}ms "
+                    print(f"[CAPTURE DSLR] total={t7-t0:.0f}ms prearmed={prearmed} "
                           f"toggle={(t2-t1)+(t6-t5):.0f} dl={(t5-t3):.0f} save={(t5-t4):.0f} setbuf={(t7-t6):.0f}")
                     return jsonify({
                         "ok": True,
@@ -667,17 +743,16 @@ def capture():
     finally:
         capture_lock.release()
 
+
 @app.route("/api/delete_recent", methods=["POST"])
 def api_delete_recent():
-    # guard เปิด/ปิดจาก .env
     if not DELETE_RECENT_AFTER_UPLOAD:
         return jsonify({"ok": False, "error": "disabled-by-config"}), 403
 
     payload = request.get_json(silent=True) or {}
-    # จำนวนรูปที่จะลบ รับจาก body.count หรือ query ?count=
     try:
         count = int(request.args.get("count", payload.get("count", DELETE_RECENT_COUNT)))
-        count = max(1, min(count, 20))  # กันค่าเกิน
+        count = max(1, min(count, 20))
     except Exception:
         count = DELETE_RECENT_COUNT
 
@@ -690,6 +765,7 @@ def api_delete_recent():
         "failed": failed,
         "dir": SAVE_DIR,
     }), 200
+
 
 @app.route('/captured_images/<path:filename>')
 def serve_captured_image(filename):
@@ -709,7 +785,6 @@ def video_feed():
     global viewers, pause_live
     viewers += 1
 
-    # 1) เคารพ autoconfirm (resume live)
     try:
         ac = request.args.get("autoconfirm", "0").lower()
         if ac in ("1", "true", "yes"):
@@ -717,21 +792,20 @@ def video_feed():
     except Exception:
         pass
 
-    # 2) ล้างเฟรมค้างถ้าขอ fresh=1
     try:
         if request.args.get("fresh", "0").lower() in ("1", "true", "yes"):
             _clear_latest()
     except Exception:
         pass
 
-    # 3) เริ่ม live-thread ให้ตรง engine ทันที (สำคัญ!)
     try:
         _start_live_for_current_engine()
+        # ensure DSLR LV is on when someone starts viewing
+        _wake_dslr_internal()
     except Exception:
         pass
 
-    # helper: รอให้ได้เฟรมแรกภายในเดดไลน์ (ms)
-    def _ensure_first_frame_ready(deadline_ms=FIRST_FRAME_DEADLINE_MS):
+    def _ensure_first_frame_ready_local(deadline_ms=FIRST_FRAME_DEADLINE_MS):
         t0 = time.time()
         while True:
             with buf_lock:
@@ -739,15 +813,13 @@ def video_feed():
                     return True
             if (time.time() - t0) * 1000.0 >= deadline_ms:
                 return False
-            # รอการแจ้งเตือนว่ามีเฟรมใหม่
             frame_event.wait(timeout=0.02)
 
     def generate():
         boundary = b"--frame\r\n"
         hdr = b"Content-Type: image/jpeg\r\n\r\n"
 
-        # 4) เฟรมแรก: พยายามรอเฟรมสดสั้น ๆ; ถ้าไม่ทัน ส่งแบล็คเฟรมก่อน
-        ready = _ensure_first_frame_ready(FIRST_FRAME_DEADLINE_MS)
+        ready = _ensure_first_frame_ready_local(FIRST_FRAME_DEADLINE_MS)
         if not ready:
             try:
                 black = _black_frame_jpeg(640, 480)
@@ -756,7 +828,6 @@ def video_feed():
             if black:
                 yield boundary + hdr + black + b"\r\n"
 
-        # 5) สตรีมต่อเนื่องเมื่อมีเฟรมใหม่
         last_ver = -1
         while True:
             frame_event.wait(timeout=1.0)
@@ -780,6 +851,7 @@ def video_feed():
     return resp
 
 # ---------- Lifecycle ----------
+
 def _graceful_shutdown(*args):
     log("[SYS] shutting down ...")
     try: stop_gphoto_live(); stop_uvc_live(); stop_watcher()
@@ -787,6 +859,7 @@ def _graceful_shutdown(*args):
     try: cv2.destroyAllWindows()
     except Exception: pass
     os._exit(0)
+
 
 signal.signal(signal.SIGINT,_graceful_shutdown)
 signal.signal(signal.SIGTERM,_graceful_shutdown)
@@ -796,11 +869,6 @@ atexit.register(_graceful_shutdown)
 if __name__=="__main__":
     log(f"[BOOT] CameraServer starting at {HOST}:{PORT}")
     log(f"[BOOT] CORS_ALLOW_ORIGINS={CORS_ALLOW_ORIGINS}")
-    # start watcher → cold-probe ครั้งแรก + รอ hot-plug ต่อไป
-    def start_watcher():
-        global watcher_thread, watcher_running
-        if watcher_thread and watcher_thread.is_alive(): return
-        watcher_running=True
-        watcher_thread=threading.Thread(target=watcher_loop,daemon=True); watcher_thread.start()
     start_watcher()
     app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True)
+    

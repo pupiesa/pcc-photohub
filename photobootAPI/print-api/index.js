@@ -16,6 +16,10 @@ const raw = process.env.CORS_ALLOW_ORIGINS || "";
 const allowlist = raw.split(",").map(s => s.trim()).filter(Boolean);
 const allowNoOrigin = true;
 
+// === env switches (ยังคงเดิม) ===
+const AUTO_DELETE_PDF_AFTER_PRINT = String(process.env.AUTO_DELETE_PDF_AFTER_PRINT || "").toLowerCase() === "true";
+const AUTO_DELETE_PDF_DELAY_MS = Number(process.env.AUTO_DELETE_PDF_DELAY_MS || 3000);
+
 const corsOptions = {
   origin(origin, cb) {
     if (!origin) return allowNoOrigin ? cb(null, true) : cb(new Error("CORS: Origin required"), false);
@@ -80,28 +84,26 @@ const embedOverlayIfExists = async (pdfDoc, page, overlayAbs) => {
   return img;
 };
 
+const scheduleDelete = (outPath) => {
+  if (!AUTO_DELETE_PDF_AFTER_PRINT || !outPath) return;
+  setTimeout(() => {
+    fs.unlink(outPath, (err) => {
+      if (err) console.warn("⚠️ Failed to delete PDF:", err.message);
+      else console.log(`🗑️ Deleted temp PDF ${outPath}`);
+    });
+  }, AUTO_DELETE_PDF_DELAY_MS);
+};
+
 // ----------- /print -----------
 /**
  * Body:
  * {
- *   paths: string[],                          // รูปที่ใช้
- *   templateKey?: string,                     // โฟลเดอร์ใน ./templates/<key>
- *   slots?: Array<{x,y,w,h,rotate?,src?,zoom?,ox?,oy?}>, // override slots
- *   overlayPath?: string,                     // override path ของ overlay
- *   overlayLayer?: "below" | "above",         // บังคับเลเยอร์ overlay
- *   footerText?: string, footerH?: number     // ใช้เฉพาะ fallback grid
- * }
- *
- * template.json รูปแบบแนะนำ:
- * {
- *   "page": { "widthPt": 288, "heightPt": 432 },
- *   "template": { "file": "overlay.png", "layer": "above" },  // หรือ "below"
- *   "slots": [
- *      { "x": 17, "y": 288.5, "w": 120, "h": 80, "rotate": 0,   "src": 0 },
- *      { "x": 151.5, "y": 288.5, "w": 120, "h": 80, "rotate": 90,  "src": 0 },
- *      { "x": 17, "y": 105, "w": 120, "h": 80, "rotate": 180, "src": 1 },
- *      { "x": 151.5, "y": 105, "w": 120, "h": 80, "rotate": 270, "src": 1 }
- *   ]
+ *   paths: string[],
+ *   templateKey?: string,                     // <-- ใช้เฉพาะค่าที่ส่งมา ถ้าไม่ส่ง = no-template (auto-grid)
+ *   slots?: Array<{x,y,w,h,rotate?,src?,zoom?,ox?,oy?}>,
+ *   overlayPath?: string,
+ *   overlayLayer?: "below" | "above",
+ *   footerText?: string, footerH?: number
  * }
  */
 app.post("/print", async (req, res) => {
@@ -109,7 +111,7 @@ app.post("/print", async (req, res) => {
     paths,
     overlayPath: overlayPathOverride,
     overlayLayer: overlayLayerOverride,
-    templateKey,
+    templateKey: templateKeyFromBody,
     slots: slotsFromBody,
     footerText,
     footerH,
@@ -136,21 +138,22 @@ app.post("/print", async (req, res) => {
     return res.status(400).json({ error: "No valid image files found on server", missing, cwd: process.cwd() });
   }
 
-  // ---------- load template.json ----------
+  // ---------- template selection: ใช้เฉพาะค่าจาก body ----------
   const templatesRoot = path.join(__dirname, "templates");
-  const baseDir  = templateKey ? path.join(templatesRoot, templateKey) : null;
+  const usedTemplateKey = (typeof templateKeyFromBody === "string" && templateKeyFromBody.trim())
+    ? templateKeyFromBody.trim()
+    : null;
+
+  const baseDir  = usedTemplateKey ? path.join(templatesRoot, usedTemplateKey) : null;
   const confPath = baseDir ? path.join(baseDir, "template.json") : null;
 
   let tpl = null;
   if (confPath && fs.existsSync(confPath)) {
-    try {
-      tpl = JSON.parse(fs.readFileSync(confPath, "utf8"));
-    } catch (e) {
-      console.warn("template.json parse error:", e?.message || e);
-    }
+    try { tpl = JSON.parse(fs.readFileSync(confPath, "utf8")); }
+    catch (e) { console.warn("template.json parse error:", e?.message || e); }
   }
 
-  // page size from template
+  // page size from template (ถ้าไม่มี template → ใช้ default)
   const PAGE_W = Number.isFinite(tpl?.page?.widthPt)  ? tpl.page.widthPt  : PAGE_W_DEFAULT;
   const PAGE_H = Number.isFinite(tpl?.page?.heightPt) ? tpl.page.heightPt : PAGE_H_DEFAULT;
 
@@ -159,7 +162,6 @@ app.post("/print", async (req, res) => {
                      : (Array.isArray(tpl?.slots) ? tpl.slots : null);
 
   // overlay file and layer
-  // priority: body overlayPath -> template.template.file -> templates/<key>/overlay.(png|jpg)
   let overlayAbs = null;
   let overlayLayer = (overlayLayerOverride === "above" || overlayLayerOverride === "below")
     ? overlayLayerOverride
@@ -174,66 +176,59 @@ app.post("/print", async (req, res) => {
       : (baseDir ? path.join(baseDir, tpl.template.file) : tpl.template.file);
     if (fs.existsSync(maybe)) overlayAbs = maybe;
   } else if (baseDir) {
-    // auto lookup overlay.png / overlay.jpg
     const candidates = ["overlay.png", "overlay.jpg", "overlay.jpeg"].map(n => path.join(baseDir, n));
     overlayAbs = candidates.find(p => fs.existsSync(p)) || null;
   }
 
-  console.log("[TEMPLATE] root:", templatesRoot);
-  console.log("[TEMPLATE] baseDir:", baseDir);
+  console.log("[TEMPLATE] using key:", usedTemplateKey || "(none)");
   console.log("[TEMPLATE] confPath exists?:", !!(confPath && fs.existsSync(confPath)));
   console.log("[TEMPLATE] overlayPath used:", overlayAbs || "(none)");
   console.log("[TEMPLATE] overlayLayer:", overlayLayer);
   console.log("[TEMPLATE] slots mode:", slotsConfig ? `template-slots (${slotsConfig.length})` : "auto-grid");
 
+  let outPath = null;
+
   try {
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
 
-    // พื้นหลังสีขาว
+    // background white
     page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: PAGE_H, color: rgb(1,1,1) });
 
-    // เตรียมรูปทั้งหมด (embed ครั้งเดียว)
+    // embed all images
     const embedded = [];
     for (const r of resolved) embedded.push(await loadImage(pdfDoc, r));
 
-    // วาด overlay (ถ้า layer เป็น below)
+    // overlay below
     if (overlayAbs && overlayLayer === "below") {
       await embedOverlayIfExists(pdfDoc, page, overlayAbs);
     }
 
-    // ----- วาดรูปตาม slots  -----
+    // draw by slots or fallback grid
     if (slotsConfig && slotsConfig.length > 0) {
       const nImgs = embedded.length;
 
       for (let i = 0; i < slotsConfig.length; i++) {
         const s = slotsConfig[i];
-
-        // เลือกรูป: src ที่กำหนด หรือวนตาม index
         const imgIdx = Number.isInteger(s.src) ? ((s.src % nImgs) + nImgs) % nImgs : (i % nImgs);
         const img = embedded[imgIdx];
 
-        // ขนาดสุดท้าย = ขนาดช่อง * zoom (ไม่รักษาอัตราส่วน)
         const zoom = Number.isFinite(s.zoom) ? Math.max(0.05, s.zoom) : 1.0;
         const drawW = s.w * zoom;
         const drawH = s.h * zoom;
 
-        // จัดตำแหน่งกึ่งกลางในกรอบ พร้อม offset
         const offX = Number.isFinite(s.ox) ? s.ox : 0;
         const offY = Number.isFinite(s.oy) ? s.oy : 0;
         const x = s.x + (s.w - drawW) / 2 + offX;
         const y = s.y + (s.h - drawH) / 2 + offY;
 
         page.drawImage(img, {
-          x,
-          y,
-          width: drawW,
-          height: drawH,
+          x, y, width: drawW, height: drawH,
           rotate: degrees(Number.isFinite(s.rotate) ? s.rotate : 0),
         });
       }
     } else {
-      // ----- fallback: 2x2 grid แบบเก่า -----
+      // fallback: 2x2 grid
       const GRID_W = PAGE_W - MARGIN * 2, GRID_H = PAGE_H - MARGIN * 2 - FOOTER_H;
       const cellW = (GRID_W - GUTTER) / 2, cellH = (GRID_H - GUTTER) / 2;
       const slotW = Math.min(cellW, cellH * SLOT_ASPECT);
@@ -261,7 +256,7 @@ app.post("/print", async (req, res) => {
         page.drawImage(img, { x: imgX, y: imgY, width: drawW, height: drawH });
       }
 
-      // เส้นคั่น + ข้อความเล็ก ๆ
+      // footer line + text
       page.drawRectangle({ x: MARGIN, y: MARGIN + FOOTER_H - 18,
         width: PAGE_W - MARGIN*2, height: 0.6, color: rgb(0.9,0.9,0.9) });
 
@@ -273,39 +268,46 @@ app.post("/print", async (req, res) => {
       }
     }
 
-    // วาด overlay (ถ้า layer เป็น above)
+    // overlay above
     if (overlayAbs && overlayLayer === "above") {
       await embedOverlayIfExists(pdfDoc, page, overlayAbs);
     }
 
-    // ---------- save & print ----------
+    // save file
     const outDir = path.join(process.cwd(), "printed_image");
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     const pad2 = (n)=>n.toString().padStart(2,"0");
     const now = new Date();
     const ts = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
-    const outPath = path.join(outDir, `print_${templateKey || "custom"}_${ts}.pdf`);
+    const outPath = path.join(outDir, `print_${usedTemplateKey || "custom"}_${ts}.pdf`);
 
     const pdfBytes = await pdfDoc.save();
     fs.writeFileSync(outPath, pdfBytes);
 
-    await printPDF(outPath);
-
-    setTimeout(() => {
-      fs.unlink(outPath, (err) => {
-        if (err) console.warn("⚠️ Failed to delete PDF:", err.message);
-        else console.log(`🗑️ Deleted temp PDF ${outPath}`);
+    // try to print
+    try {
+      await printPDF(outPath);
+      scheduleDelete(outPath);
+      return res.json({
+        ok: true,
+        message: `PDF created and sent to printer "${process.env.PRINTER_NAME}"`,
+        pdfPath: outPath,
+        templateKey: usedTemplateKey || null,
+        overlayUsed: !!overlayAbs,
+        overlayLayer,
+        slotsMode: slotsConfig ? `template-slots (${slotsConfig.length})` : "auto-grid"
       });
-    }, 3000);
-
-    return res.json({
-      ok: true,
-      message: `PDF created and sent to printer "${process.env.PRINTER_NAME}"`,
-      pdfPath: outPath,
-      overlayUsed: !!overlayAbs,
-      overlayLayer,
-      slotsMode: slotsConfig ? `template-slots (${slotsConfig.length})` : "auto-grid"
-    });
+    } catch (printErr) {
+      console.error("❌ Print failed:", printErr?.message || printErr);
+      scheduleDelete(outPath);
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to print",
+        reason: String(printErr?.message || printErr),
+        pdfPath: outPath,
+        templateKey: usedTemplateKey || null
+      });
+    }
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Failed to create PDF or print" });
@@ -379,6 +381,8 @@ app.listen(PORT, HOST, () => {
     printer: process.env.PRINTER_NAME || "NOT SET",
     host: HOST,
     port: PORT,
+    autoDelete: AUTO_DELETE_PDF_AFTER_PRINT,
+    deleteDelayMs: AUTO_DELETE_PDF_DELAY_MS
   };
   console.log("[ENV]", envSummary);
   console.log("printer service running");

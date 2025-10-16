@@ -16,10 +16,13 @@ import { Loader } from "@/components/ui/shadcn-io/ai/loader";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { toast } from "sonner";
 
-const TEMPLATE_KEY = process.env.TEMPLATE || "kmitl2025";
+const TEMPLATE_KEY = pprocess.env.NEXT_PUBLIC_TEMPLATE || "kmitl2025";
+
 const CAMERA_BASE =
   (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
+
+const CHE_OFFSET_MS = Number(process.env.NEXT_PUBLIC_CHE_OFFSET_MS ?? 0) || 0;
 
 const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
 const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
@@ -42,6 +45,10 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const [sessionPaths, setSessionPaths] = useState([]);
   const [busy, setBusy] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+
+  // ===== Reconnect visual state =====
+  const wasLiveRef = useRef(false);
+  const [reconnecting, setReconnecting] = useState(false);
 
   // ===== Session key to avoid stream conflicts =====
   const SESSION_KEY = useMemo(() => {
@@ -72,7 +79,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   // ให้ Loader ค้างครอบแบล็คเฟรมสักครู่ (เพื่อกันกระพริบ)
   const suppressOnLoadUntil = useRef(0);
-  const HOLD_MS = 800;
+  const HOLD_MS = 500;
 
   // Fit mode for <img> (kept as in your UI)
   const [fitMode, setFitMode] = useState("cover");
@@ -88,7 +95,6 @@ export default function PhotoboothInterface({ user, onLogout }) {
   const baseDelay = 900;
   const jitter = () => Math.random() * 300;
 
-  // ใช้ fresh=1 ทุกครั้งที่เริ่ม/สลับ live เพื่อบังคับแบล็คเฟรมแทนเฟรมค้าง
   const makeLiveUrl = (fresh = false) => {
     if (!CAMERA_BASE) return null;
     const ts = Date.now();
@@ -102,14 +108,21 @@ export default function PhotoboothInterface({ user, onLogout }) {
     retryRef.current.timer = null;
   };
 
+  const wakeCamera = async () => {
+    if (!CAMERA_BASE) return;
+    try { await fetch(`${CAMERA_BASE}/api/wake`, { method: "POST" }); } catch {}
+  };
+
   const reloadLive = (delay = baseDelay) => {
     try { clearTimeout(retryRef.current.timer); } catch {}
-    retryRef.current.timer = setTimeout(() => {
+    retryRef.current.timer = setTimeout(async () => {
       if (capturedImage || redirecting || busy || photosTaken >= MAX_PHOTOS) return;
       retryRef.current.tries = Math.min(retryRef.current.tries + 1, MAX_RETRY);
-      const url = makeLiveUrl(true); // <<<< ใช้ fresh=1 เสมอ
+      await wakeCamera();
+      const url = makeLiveUrl(true);
       if (url) {
-        suppressOnLoadUntil.current = Date.now() + HOLD_MS; // ค้าง Loader ทับแบล็คเฟรม
+        setReconnecting(true);
+        suppressOnLoadUntil.current = Date.now() + HOLD_MS;
         liveStartAtRef.current = Date.now();
         setLiveSrc(url);
         setLiveLoading(true);
@@ -134,12 +147,12 @@ export default function PhotoboothInterface({ user, onLogout }) {
           const h = await r.json().catch(() => ({}));
 
           if (!h?.running || h?.paused) {
-            await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
-            reloadLive(450); // จะเรียก fresh=1 ภายใน
+            await wakeCamera();
+            reloadLive(450);
           }
         } catch {
-          fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
-          reloadLive(1200); // จะเรียก fresh=1 ภายใน
+          await wakeCamera();
+          reloadLive(1200);
         }
       };
 
@@ -189,9 +202,10 @@ export default function PhotoboothInterface({ user, onLogout }) {
   initLiveFirstTime.current = async () => {
     setLiveLoading(true);
     resetRetry();
+    await wakeCamera();
     const url = makeLiveUrl(true);
     if (url) {
-      suppressOnLoadUntil.current = Date.now() + HOLD_MS; // ให้ Loader ค้างครอบแบล็คเฟรมช่วงสั้น ๆ
+      suppressOnLoadUntil.current = Date.now() + HOLD_MS;
       liveStartAtRef.current = Date.now();
       setLiveSrc(url);
     }
@@ -216,20 +230,22 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   // ===== Handlers for live <img> =====
   const onLiveLoad = () => {
-    // หน่วงปิด Loader ให้เลยช่วงแบล็คเฟรม
     const now = Date.now();
     if (now >= suppressOnLoadUntil.current) {
       setLiveLoading(false);
     } else {
       setTimeout(() => setLiveLoading(false), suppressOnLoadUntil.current - now);
     }
+    wasLiveRef.current = true;
+    setReconnecting(false);
     resetRetry();
   };
   const onLiveError = () => {
     setLiveLoading(false);
+    setReconnecting(true);
     const tries = retryRef.current.tries;
     const nextDelay = Math.min(baseDelay * (1 + tries), 3000);
-    reloadLive(nextDelay); // รีทรายแบบ fresh=1
+    reloadLive(nextDelay);
   };
 
   // ===== Photo flow: overlay -> countdown -> capture =====
@@ -243,8 +259,12 @@ export default function PhotoboothInterface({ user, onLogout }) {
       fetch(`${PRINT_BASE}/play/321.wav`).catch(() => {});
       let count = 3;
       setCountdown(count);
-      const timer = setInterval(() => {
+      const timer = setInterval(async () => {
         count -= 1;
+        // Pre‑arm the camera ~1s before shutter to remove DSLR toggle lag
+        if (count === 1 && CAMERA_BASE) {
+          try { await fetch(`${CAMERA_BASE}/api/prepare_shot`, { method: "POST" }); } catch {}
+        }
         if (count > 0) setCountdown(count);
         else {
           setCountdown("📸");
@@ -256,7 +276,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
     }, 2800);
   };
 
-  // ===== Capture with hard-timeout + session =====
+  // ===== Capture with hard-timeout + session (zero‑lag ordering) =====
   const handleCapture = async () => {
     if (!CAMERA_BASE || !SESSION_KEY) return;
     setBusy(true);
@@ -266,14 +286,28 @@ export default function PhotoboothInterface({ user, onLogout }) {
     const kill = setTimeout(() => ctrl.abort(), CAPTURE_TIMEOUT_MS);
 
     try {
-      fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {});
-      const res = await fetch(`${CAMERA_BASE}/capture`, {
+      // Fire capture FIRST, then play the shutter sound immediately → perceived zero‑lag
+      // If user wants sound BEFORE capture, play then wait abs(offset) (capped 1200ms)
+      if (CHE_OFFSET_MS < 0) {
+        try { fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {}); } catch {}
+        await new Promise((r) => setTimeout(r, Math.min(1200, Math.abs(CHE_OFFSET_MS))));
+      }
+
+      // Start capture request
+      const capPromise = fetch(`${CAMERA_BASE}/capture`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session: SESSION_KEY }),
         signal: ctrl.signal,
       });
 
+      // If offset is >= 0, schedule sound AFTER capture start
+      if (CHE_OFFSET_MS >= 0) {
+        if (CHE_OFFSET_MS === 0) { try { fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {}); } catch {} }
+        else { setTimeout(() => { try { fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {}); } catch {} }, Math.min(1200, CHE_OFFSET_MS)); }
+      }
+
+      const res = await capPromise;
       if (!res.ok) {
         if (res.status === 429 || res.status === 410) {
           await fetch(`${CAMERA_BASE}/confirm`, { method: "POST" }).catch(() => {});
@@ -441,7 +475,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
   const hideUi = shooting && !capturedImage;
 
-  // ====== RETURN (kept your UI, with small handler bindings) ======
+  // ====== RETURN (UI unchanged except reconnect copy) ======
   return (
     <div className="fixed inset-0 z-20 bg-black">
       {/* ชั้นภาพ (เต็มจอ) */}
@@ -450,7 +484,9 @@ export default function PhotoboothInterface({ user, onLogout }) {
           <div className="absolute inset-0 grid place-items-center text-white/90">
             <div className="flex flex-col items-center gap-3">
               <Loader />
-              <div className="text-sm opacity-80">Starting live preview…</div>
+              <div className="text-sm opacity-80">
+                {wasLiveRef.current ? "Reconnecting to camera…" : "Starting live preview…"}
+              </div>
             </div>
           </div>
         )}
@@ -584,7 +620,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
               }`}
             />
             <span className="text-xs text-white/80">
-              {liveLoading ? "Connecting" : liveSrc ? "Ready" : "Offline"}
+              {reconnecting ? "Reconnecting" : liveLoading ? "Connecting" : liveSrc ? "Ready" : "Offline"}
             </span>
           </div>
         </div>

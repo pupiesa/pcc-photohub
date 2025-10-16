@@ -285,30 +285,56 @@ export default function CustomerDashboard() {
   if (!/^\d{6}$/.test(otp) || !phone || sending) return;
   setFlowError(null); setSending(true);
   try {
+    // 1) ยืนยัน OTP + บันทึกอีเมล + ยอมรับเงื่อนไข
     await client.confirmEmailOTP({ number: phone, email: email.trim(), otp });
     await client.setGmail(phone, email.trim());
     await client.setConsentedTrue(phone);
 
-    // 🔒  Nextcloud 
+    // 2) ตรวจว่ามีลิงก์ Nextcloud เดิมอยู่หรือไม่
+    let existingLink = null;
     try {
-      const shareRes = await client.shareOnlyForUser({
-        number: phone,
-        linkPassword: phone,  
-        permissions: 1,
-        publicUpload: false,
-        note: `PCC PhotoHub Share for ${email.trim()}`,
-        forceNew: true,
-      });
+      const u = await client.getUserByNumber(phone);
+      existingLink = u?.data?.nextcloud_link || null;
+    } catch {}
 
-      if (shareRes?.link) {
-        await client.setNextcloudLink(phone, shareRes.link);
-        toast.success("สร้างลิงก์แชร์สำเร็จ");
-      } else {
-        toast.warning("สร้างลิงก์ไม่สำเร็จ แต่ยืนยันอีเมลแล้ว");
+    // 3) ถ้ามีลิงก์แล้ว ⇒ เปลี่ยนรหัสผ่านของลิงก์เป็นหมายเลขโทรศัพท์
+    if (existingLink) {
+      try {
+        await client.changeSharePasswordForUser({
+          number: phone,
+          newPassword: phone,       // รหัสผ่าน = เบอร์โทรผู้ใช้
+          permissions: 1,
+          publicUpload: false,
+          note: `PCC PhotoHub Share for ${email.trim()})`,
+        });
+        // ไม่ต้องอัปเดตลิงก์ใน DB เพราะลิงก์เดิมยังใช้ได้เหมือนเดิม (แค่เปลี่ยนรหัสผ่าน)
+        //toast.success("ลิงก์สำหรับแชร์รูปภาพสำเร็จ");
+      } catch (err) {
+        console.log("Nextcloud change password error:", err);
+        toast.error("เปลี่ยนรหัสผ่านลิงก์แชร์ไม่สำเร็จ");
       }
-    } catch (err) {
-      console.log("Nextcloud share error:", err);
-      toast.error("ไม่สามารถสร้างลิงก์แชร์ได้");
+    } else {
+      // 4) ถ้ายังไม่มีลิงก์ ⇒ สร้างลิงก์ใหม่ พร้อมตั้งรหัสเป็นเบอร์โทร
+      try {
+        const shareRes = await client.shareOnlyForUser({
+          number: phone,
+          linkPassword: phone,     // รหัสผ่าน = เบอร์โทรผู้ใช้
+          permissions: 1,
+          publicUpload: false,
+          note: `PCC PhotoHub Share for ${email.trim()}`,
+          forceNew: true,
+        });
+
+        if (shareRes?.link) {
+          await client.setNextcloudLink(phone, shareRes.link);
+          toast.success("สร้างลิงก์แชร์สำเร็จ");
+        } else {
+          toast.warning("สร้างลิงก์ไม่สำเร็จ แต่ยืนยันอีเมลแล้ว");
+        }
+      } catch (err) {
+        console.log("Nextcloud share error:", err);
+        toast.error("ไม่สามารถสร้างลิงก์แชร์ได้");
+      }
     }
 
     toast.success("ยืนยันอีเมลสำเร็จ");
