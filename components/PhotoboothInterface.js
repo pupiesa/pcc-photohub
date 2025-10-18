@@ -16,13 +16,18 @@ import { Loader } from "@/components/ui/shadcn-io/ai/loader";
 import { GradientText } from "@/components/ui/shadcn-io/gradient-text";
 import { toast } from "sonner";
 
-const TEMPLATE_KEY = pprocess.env.NEXT_PUBLIC_TEMPLATE || "kmitl2025";
-
+const TEMPLATE_KEY = process.env.TEMPLATE || "kmitl2025";
 const CAMERA_BASE =
   (process.env.NEXT_PUBLIC_CAMERA_BASE || "").replace(/\/$/, "") || null;
 const MAX_PHOTOS = 2;
 
+// Optional shutter-sound offset (ms). 0 = play immediately, >0 = delay after capture start, <0 = play before capture
 const CHE_OFFSET_MS = Number(process.env.NEXT_PUBLIC_CHE_OFFSET_MS ?? 0) || 0;
+// Mirror live preview like a selfie (does not affect saved photo)
+const LIVE_MIRROR = (process.env.NEXT_PUBLIC_LIVE_MIRROR ?? "true").toLowerCase() === "true";
+// Edge flash effect config (color & thickness)
+const EDGE_COLOR = (process.env.NEXT_PUBLIC_SHUTTER_EDGE_COLOR || "#22d3ee").trim();
+const EDGE_THICKNESS = Number(process.env.NEXT_PUBLIC_SHUTTER_EDGE_PX ?? 100) || 100;
 
 const PRINT_HOST = process.env.PRINT_API_HOST || "127.0.0.1";
 const PRINT_PORT = process.env.PRINT_API_PORT || "5000";
@@ -88,6 +93,18 @@ export default function PhotoboothInterface({ user, onLogout }) {
     [fitMode]
   );
 
+  // Shutter edge-flash (4-side glow)
+  const [flashOn, setFlashOn] = useState(false);
+  const triggerShutterFX = () => {
+    try { setFlashOn(false); } catch {}
+    setTimeout(() => { try { setFlashOn(true); } catch {} }, 0);
+    setTimeout(() => { try { setFlashOn(false); } catch {} }, 650);
+  };
+  const playCheNow = () => {
+    try { playCheNow(); } catch {}
+    try { triggerShutterFX(); } catch {}
+  };
+
   // ===== Retry/backoff for live preview + warm-up guard =====
   const retryRef = useRef({ tries: 0, timer: null });
   const liveStartAtRef = useRef(0);
@@ -146,6 +163,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
           const r = await fetch(`${CAMERA_BASE}/api/health`, { cache: "no-store" });
           const h = await r.json().catch(() => ({}));
 
+          // ถ้า live หยุด/พัก → ปลุก + รีคอนเนค
           if (!h?.running || h?.paused) {
             await wakeCamera();
             reloadLive(450);
@@ -289,7 +307,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
       // Fire capture FIRST, then play the shutter sound immediately → perceived zero‑lag
       // If user wants sound BEFORE capture, play then wait abs(offset) (capped 1200ms)
       if (CHE_OFFSET_MS < 0) {
-        try { fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {}); } catch {}
+        try { playCheNow(); } catch {}
         await new Promise((r) => setTimeout(r, Math.min(1200, Math.abs(CHE_OFFSET_MS))));
       }
 
@@ -303,8 +321,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
 
       // If offset is >= 0, schedule sound AFTER capture start
       if (CHE_OFFSET_MS >= 0) {
-        if (CHE_OFFSET_MS === 0) { try { fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {}); } catch {} }
-        else { setTimeout(() => { try { fetch(`${PRINT_BASE}/play/che.wav`).catch(() => {}); } catch {} }, Math.min(1200, CHE_OFFSET_MS)); }
+        if (CHE_OFFSET_MS === 0) { try { playCheNow(); } catch {} }
+        else { setTimeout(() => { try { playCheNow(); } catch {} }, Math.min(1200, CHE_OFFSET_MS)); }
       }
 
       const res = await capPromise;
@@ -497,7 +515,8 @@ export default function PhotoboothInterface({ user, onLogout }) {
               ref={liveImgRef}
               src={liveSrc ?? undefined}
               alt="Live preview"
-              className={`w-full h-full ${objectClass} select-none`}
+              className={`w-full h-full ${objectClass} select-none transform`}
+              style={{ transform: LIVE_MIRROR ? 'scaleX(-1)' : undefined }}
               onLoad={onLiveLoad}
               onError={onLiveError}
               draggable={false}
@@ -647,7 +666,7 @@ export default function PhotoboothInterface({ user, onLogout }) {
         </div>
       </div>
 
-      {/* แถบปุ่มกึ่งกลางด้านล่าง — ❗คงสี/เงาเดิม */}
+      {/* แถบปุ่มกึ่งกลางด้านล่าง */}
       <div
         className={`absolute inset-x-0 bottom-6 flex justify-center px-4 transition-all duration-200 ${
           hideUi
@@ -700,6 +719,56 @@ export default function PhotoboothInterface({ user, onLogout }) {
         </div>
       </div>
 
+      {/* Shutter edge-flash overlay */}
+      {flashOn && (
+        <div className="absolute inset-0 pointer-events-none z-[60] edge-flash">
+          {/* Top */}
+          <div
+            className="absolute left-0 right-0"
+            style={{
+              top: 0,
+              height: EDGE_THICKNESS,
+              background: `linear-gradient(to bottom, ${EDGE_COLOR}, transparent)`,
+              filter: "blur(6px)",
+              opacity: 0.95,
+            }}
+          />
+          {/* Bottom */}
+          <div
+            className="absolute left-0 right-0"
+            style={{
+              bottom: 0,
+              height: EDGE_THICKNESS,
+              background: `linear-gradient(to top, ${EDGE_COLOR}, transparent)`,
+              filter: "blur(6px)",
+              opacity: 0.95,
+            }}
+          />
+          {/* Left */}
+          <div
+            className="absolute top-0 bottom-0"
+            style={{
+              left: 0,
+              width: EDGE_THICKNESS,
+              background: `linear-gradient(to right, ${EDGE_COLOR}, transparent)`,
+              filter: "blur(6px)",
+              opacity: 0.95,
+            }}
+          />
+          {/* Right */}
+          <div
+            className="absolute top-0 bottom-0"
+            style={{
+              right: 0,
+              width: EDGE_THICKNESS,
+              background: `linear-gradient(to left, ${EDGE_COLOR}, transparent)`,
+              filter: "blur(6px)",
+              opacity: 0.95,
+            }}
+          />
+        </div>
+      )}
+
       {/* Overlay shadcn Dialog */}
       <Dialog open={photosTaken >= MAX_PHOTOS && !redirecting}>
         <DialogContent>
@@ -743,6 +812,13 @@ export default function PhotoboothInterface({ user, onLogout }) {
         .animate-zoomIn { animation: zoomIn 260ms ease-out both; }
         .animate-bounceArrow { animation: bounceArrow 1.1s ease-in-out infinite; }
         .animate-lightScan { animation: lightScan 2.2s ease-in-out infinite; }
+        @keyframes edgeFlash {
+          0%   { opacity: 0; transform: scale(1.02); }
+          10%  { opacity: 1;  transform: scale(1.00); }
+          70%  { opacity: 0.85; }
+          100% { opacity: 0;  transform: scale(0.998); }
+        }
+        .edge-flash { animation: edgeFlash 560ms ease-out both; }
       `}</style>
     </div>
   );
